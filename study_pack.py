@@ -29,15 +29,16 @@ SENTENCES_PER_AUDIO_FILE = 20
 TARGET_LANGUAGE = "French"
 NATIVE_LANGUAGE_CHOICES = ["English", "French", "Spanish", "German", "Portuguese"]
 
-HF_GENERATION_MODEL = "Qwen/Qwen2.5-7B-Instruct"
+HF_GENERATION_MODEL = "Qwen/Qwen3-8B"
 MODAL_TTS_MODEL = "kyutai/tts-1.6b-en_fr"
 MODAL_TTS_VOICE_REPO = "kyutai/tts-voices"
 MODAL_TTS_VOICE = "voice-donations/Hugo_the_frenchie_enhanced.wav"
-HF_GENERATION_PARAMS = 7_615_616_512
+HF_GENERATION_PARAMS = 8_200_000_000
 MODAL_TTS_PARAMS = 1_800_000_000
 MODAL_TTS_TIMEOUT_SECONDS = 120.0
 FRENCH_ONLY_ERROR = "This v1 build currently supports French only."
 MACOS_FRENCH_VOICE_CANDIDATES = ("Amélie", "Thomas")
+AUDIO_SENTENCE_PAUSE_SECONDS = 2.0
 
 SUPPORTED_LANGUAGES: dict[str, dict[str, str]] = {
     TARGET_LANGUAGE: {"tts_code": "fr", "language_label": TARGET_LANGUAGE},
@@ -393,7 +394,10 @@ def _write_macos_fallback_wav(
     if not say_binary or not afconvert_binary:
         raise RuntimeError("macOS speech tools are unavailable for local fallback audio generation.")
 
-    spoken_text = "\n".join(sentence.strip() for sentence in sentences if sentence.strip())
+    pause_milliseconds = int(AUDIO_SENTENCE_PAUSE_SECONDS * 1000)
+    spoken_text = f" [[slnc {pause_milliseconds}]] ".join(
+        sentence.strip() for sentence in sentences if sentence.strip()
+    )
     if not spoken_text:
         raise ValueError("At least one non-empty sentence is required for local fallback audio generation.")
 
@@ -763,8 +767,6 @@ def build_results_rows(cards: list[SentenceCard]) -> list[list[str]]:
             card.source_sentence,
             card.target_sentence,
             card.verb_lemma,
-            card.why_it_is_useful,
-            card.pronunciation_hint,
         ]
         for card in cards
     ]

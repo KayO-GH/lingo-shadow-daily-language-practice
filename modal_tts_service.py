@@ -13,7 +13,7 @@ KYUTAI_TTS_MODEL = "kyutai/tts-1.6b-en_fr"
 KYUTAI_TTS_VOICE_REPO = "kyutai/tts-voices"
 KYUTAI_TTS_VOICE = "voice-donations/Hugo_the_frenchie_enhanced.wav"
 KYUTAI_SAMPLE_RATE = 24_000
-SENTENCE_PAUSE_SECONDS = 0.18
+SENTENCE_PAUSE_SECONDS = 2.0
 
 image = (
     modal.Image.debian_slim(python_version="3.12")
@@ -135,8 +135,7 @@ def fastapi_app():
 
         try:
             tracks: list[np.ndarray] = []
-            pause_seconds = SENTENCE_PAUSE_SECONDS * (1.8 if slow_audio_value else 1.0)
-            pause = np.zeros(int(KYUTAI_SAMPLE_RATE * pause_seconds), dtype=np.float32)
+            pause = np.zeros(int(KYUTAI_SAMPLE_RATE * SENTENCE_PAUSE_SECONDS), dtype=np.float32)
 
             for index, sentence in enumerate(cleaned_sentences):
                 tracks.append(synthesize_sentence(sentence, slow_audio=slow_audio_value))

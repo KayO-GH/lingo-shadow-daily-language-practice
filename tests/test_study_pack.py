@@ -4,16 +4,23 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from study_pack import (
+    FRENCH_ONLY_ERROR,
+    MODAL_TTS_MODEL,
+    MODAL_TTS_VOICE,
     SENTENCES_PER_AUDIO_FILE,
+    TARGET_LANGUAGE,
+    ModalTTSClient,
     SentenceCard,
     StudyRoutineStep,
     create_study_pack,
     extract_json_payload,
-    get_default_tts_voice,
     generate_sentence_cards,
     get_model_stack_summary,
-    resolve_tts_voice,
+    get_native_language_choices,
+    get_supported_language_labels,
     normalize_plan,
 )
 
@@ -27,6 +34,11 @@ def test_extract_json_payload_reads_fenced_json() -> None:
 """
     payload = extract_json_payload(raw)
     assert payload["sentences"][0]["target_sentence"] == "Bonjour"
+
+
+def test_supported_languages_are_french_only() -> None:
+    assert get_supported_language_labels() == [TARGET_LANGUAGE]
+    assert get_native_language_choices() == ["English", "French", "Spanish", "German", "Portuguese"]
 
 
 def test_normalize_plan_dedupes_by_target_sentence_and_reads_routine() -> None:
@@ -92,6 +104,38 @@ def test_normalize_plan_dedupes_by_target_sentence_and_reads_routine() -> None:
     assert [card.verb_lemma for card in plan.cards] == ["avoir besoin", "aller", "etre", "pouvoir"]
 
 
+def test_modal_tts_client_posts_sentence_lists_and_slow_audio() -> None:
+    captured: dict[str, object] = {}
+
+    def fake_transport(url: str, payload: bytes, headers: dict[str, str], timeout: float) -> bytes:
+        captured["url"] = url
+        captured["payload"] = json.loads(payload.decode("utf-8"))
+        captured["headers"] = headers
+        captured["timeout"] = timeout
+        return b"RIFFfakewav"
+
+    client = ModalTTSClient(
+        base_url="https://tts.example.com",
+        auth_token="secret-token",
+        timeout_seconds=45.0,
+        transport=fake_transport,
+    )
+    audio = client.synthesize_track(["Bonjour.", "Comment allez-vous ?"], slow_audio=True)
+
+    assert audio == b"RIFFfakewav"
+    assert captured["url"] == "https://tts.example.com/synthesize-track"
+    assert captured["payload"] == {
+        "sentences": ["Bonjour.", "Comment allez-vous ?"],
+        "slow_audio": True,
+    }
+    assert captured["headers"] == {
+        "Accept": "audio/wav",
+        "Content-Type": "application/json",
+        "Authorization": "Bearer secret-token",
+    }
+    assert captured["timeout"] == 45.0
+
+
 def test_create_study_pack_writes_bundle_and_zip(tmp_path: Path) -> None:
     cards = [
         SentenceCard(
@@ -112,21 +156,15 @@ def test_create_study_pack_writes_bundle_and_zip(tmp_path: Path) -> None:
         ),
     ]
 
-    calls: list[tuple[str, str, bool]] = []
+    calls: list[tuple[list[str], bool]] = []
 
-    def fake_tts_writer(
-        text: str,
-        lang_code: str,
-        destination: Path,
-        slow_audio: bool,
-        voice_name: str,
-    ) -> None:
-        calls.append((text, lang_code, slow_audio, voice_name))
-        destination.write_bytes(f"{lang_code}|{slow_audio}|{voice_name}|{text}".encode("utf-8"))
+    def fake_tts_writer(sentences: list[str], destination: Path, slow_audio: bool) -> None:
+        calls.append((sentences, slow_audio))
+        destination.write_bytes(b"RIFFfakewav")
 
     bundle = create_study_pack(
         cards=cards,
-        target_language="French",
+        target_language=TARGET_LANGUAGE,
         focus_verbs=["avoir besoin", "aller"],
         routine_steps=[
             StudyRoutineStep(title="Preview", minutes=10, instructions="Scan verbs."),
@@ -138,17 +176,20 @@ def test_create_study_pack_writes_bundle_and_zip(tmp_path: Path) -> None:
     )
 
     assert bundle.preview_audio_path.exists()
+    assert bundle.preview_audio_path.suffix == ".wav"
     assert bundle.zip_path.exists()
     assert len(bundle.audio_paths) == 1
     assert (bundle.session_dir / "study_pack.csv").exists()
     assert (bundle.session_dir / "study_pack.json").exists()
     assert (bundle.session_dir / "daily_routine.md").exists()
     assert (bundle.session_dir / "focus_verbs.txt").exists()
-    assert calls == [("J'ai besoin de pommes.\nCe bus va ou ?", "fr", False, "af_bella")]
+    assert calls == [(["J'ai besoin de pommes.", "Ce bus va ou ?"], False)]
 
     payload = json.loads((bundle.session_dir / "study_pack.json").read_text(encoding="utf-8"))
     assert payload[0]["target_sentence"] == "J'ai besoin de pommes."
-    assert "avoir besoin" in (bundle.session_dir / "focus_verbs.txt").read_text(encoding="utf-8")
+    summary_text = (bundle.session_dir / "README.txt").read_text(encoding="utf-8")
+    assert MODAL_TTS_MODEL in summary_text
+    assert MODAL_TTS_VOICE in summary_text
 
 
 def test_create_study_pack_batches_every_twenty_sentences(tmp_path: Path) -> None:
@@ -163,43 +204,56 @@ def test_create_study_pack_batches_every_twenty_sentences(tmp_path: Path) -> Non
         for index in range(1, SENTENCES_PER_AUDIO_FILE + 2)
     ]
 
-    calls: list[str] = []
+    calls: list[list[str]] = []
 
-    def fake_tts_writer(
-        text: str,
-        lang_code: str,
-        destination: Path,
-        slow_audio: bool,
-        voice_name: str,
-    ) -> None:
-        calls.append(text)
-        destination.write_bytes(text.encode("utf-8"))
+    def fake_tts_writer(sentences: list[str], destination: Path, slow_audio: bool) -> None:
+        calls.append(sentences)
+        destination.write_bytes(b"RIFFfakewav")
 
     bundle = create_study_pack(
         cards=cards,
-        target_language="French",
+        target_language=TARGET_LANGUAGE,
         output_root=tmp_path,
         tts_writer=fake_tts_writer,
     )
 
     assert len(bundle.audio_paths) == 2
-    assert bundle.audio_paths[0].name == "01_sentences_01_20.mp3"
-    assert bundle.audio_paths[1].name == "02_sentences_21_21.mp3"
-    assert calls[0].count("\n") == SENTENCES_PER_AUDIO_FILE - 1
-    assert calls[1] == "Target sentence 21"
+    assert bundle.audio_paths[0].name == "01_sentences_01_20.wav"
+    assert bundle.audio_paths[1].name == "02_sentences_21_21.wav"
+    assert len(calls[0]) == SENTENCES_PER_AUDIO_FILE
+    assert calls[1] == ["Target sentence 21"]
 
 
-def test_model_stack_summary_mentions_both_models() -> None:
+def test_create_study_pack_rejects_non_french_target_language(tmp_path: Path) -> None:
+    cards = [
+        SentenceCard(
+            scenario="Transit",
+            source_sentence="Where is the station?",
+            target_sentence="Ou est la gare ?",
+            verb_lemma="etre",
+            why_it_is_useful="Travel question.",
+        )
+    ]
+
+    with pytest.raises(ValueError, match=FRENCH_ONLY_ERROR):
+        create_study_pack(cards=cards, target_language="Spanish", output_root=tmp_path)
+
+
+def test_model_stack_summary_mentions_qwen_and_kyutai() -> None:
     summary = get_model_stack_summary()
-    assert "Qwen/Qwen2.5-7B-Instruct" in summary
-    assert "hexgrad/Kokoro-82M" in summary
+    assert "Qwen/Qwen3-8B" in summary
+    assert "kyutai/tts-1.6b-en_fr" in summary
 
 
-def test_language_defaults_resolve_to_expected_voices() -> None:
-    assert get_default_tts_voice("French") == "af_bella"
-    assert get_default_tts_voice("German") == "am_michael"
-    assert resolve_tts_voice("French", "") == "af_bella"
-    assert resolve_tts_voice("French", "af_sarah") == "af_sarah"
+def test_generate_sentence_cards_rejects_non_french_target_language() -> None:
+    with pytest.raises(ValueError, match=FRENCH_ONLY_ERROR):
+        generate_sentence_cards(
+            use_cases="I need Spanish for errands and daily conversations.",
+            target_language="Spanish",
+            native_language="English",
+            sentence_count=20,
+            client=SimpleNamespace(),
+        )
 
 
 def test_generate_sentence_cards_retries_until_requested_count() -> None:
@@ -251,7 +305,7 @@ def test_generate_sentence_cards_retries_until_requested_count() -> None:
 
     plan = generate_sentence_cards(
         use_cases="I need French for errands and daily conversations.",
-        target_language="French",
+        target_language=TARGET_LANGUAGE,
         native_language="English",
         sentence_count=20,
         client=StubClient(),

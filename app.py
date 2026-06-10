@@ -146,7 +146,8 @@ def build_app() -> gr.Blocks:
             with gr.Column(elem_id="hero"):
                 gr.Markdown(f"# {APP_TITLE}")
                 gr.Markdown(APP_DESCRIPTION)
-                gr.Markdown(MODEL_STACK_MD)
+                with gr.Accordion("Model stack", open=False):
+                    gr.Markdown(MODEL_STACK_MD)
 
             with gr.Row():
                 with gr.Column(scale=5):
@@ -194,14 +195,12 @@ def build_app() -> gr.Blocks:
                     "Source sentence",
                     "Target sentence",
                     "Verb",
-                    "Why useful",
-                    "Pronunciation hint",
                 ],
-                datatype=["str", "str", "str", "str", "str", "str"],
+                datatype=["str", "str", "str", "str"],
                 row_count=12,
-                column_count=6,
+                column_count=4,
                 interactive=False,
-                wrap=True,
+                wrap=False,
                 label="Generated sentence pack",
             )
 
