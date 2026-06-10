@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "daily-language-practice"
+version = "0.1.0"
+description = "A Gradio app that builds a daily-life language study pack with downloadable audio."
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "cohere==5.5.5",
+    "gTTS==2.5.4",
+    "gradio==6.17.3",
+    "python-dotenv==1.0.1",
+    "pytest==8.2.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.setuptools]
+py-modules = ["app", "study_pack"]
