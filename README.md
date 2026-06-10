@@ -1,50 +1,51 @@
-# Daily Language Practice
+# LingoShadow - Daily Language Practice
 
-`Daily Language Practice` is a standalone Gradio project for building a personalized self-study pack from your real daily-life situations. It combines high-frequency sentences, verb-focused coverage, a simple 45-minute routine, and downloadable target-language audio tracks.
+`LingoShadow - Daily Language Practice` is a standalone Gradio project for building a personalized self-study pack from real daily-life situations. The current v1 is intentionally scoped to **French-only audio** so the speech quality can be materially better than the earlier English-voice workaround.
 
 ## Hackathon-safe model stack
 
 - Generation: `Qwen/Qwen2.5-7B-Instruct` with `7,615,616,512` parameters
-- TTS: `hexgrad/Kokoro-82M` with `82,000,000` parameters
-- Total model budget: `7,697,616,512` parameters
+- TTS: `kyutai/tts-1.6b-en_fr` with approximately `1.8B` parameters, served through Modal
+- Total model budget: approximately `9,415,616,512` parameters
 
-This keeps the app comfortably inside the Build Small hackathon `<= 32B` total-parameter limit while preserving good text quality and much better audio quality than the previous `gTTS` prototype path.
+This keeps the app comfortably inside the Build Small hackathon `<= 32B` total-parameter limit while moving French TTS to a model that is explicitly built for English and French.
 
 ## What it does
 
 - asks the learner to describe their general use cases and daily routines
-- chooses practical sentences that are likely to come up often
+- generates practical French sentences that are likely to come up often
 - prioritizes useful verbs and recurring situations
 - returns a simple 45-minute daily study routine
 - highlights the core verbs the learner should review first
-- translates the pack into the target language
-- generates audio tracks with up to 20 sentences per MP3 plus a downloadable ZIP bundle
+- generates downloadable French audio tracks through a dedicated Modal-backed TTS service
+- groups audio into files of up to `20` sentences per WAV track plus a downloadable ZIP bundle
 
-## What changed after reading the transcripts
+## Current scope
 
-After transcript retrieval started working, the app was refined around the repeated ideas in the reference videos:
+- French is the only supported target language in v1
+- source-language prompts can still be generated from English, French, Spanish, German, or Portuguese
+- the app does not auto-detect language for TTS
+- voice selection is fixed internally to a curated French voice embedding from `kyutai/tts-voices`
 
-- personalized materials are more useful than generic beginner lists
-- the learner should study the words and sentences they are actually going to use
-- verbs deserve special emphasis because they drive comprehension
-- listening and speaking practice should be built into the routine, not left as an afterthought
-- a lightweight daily routine is more actionable than a vague pile of examples
-
-The current build turns those ideas into:
-
-- a verb-prioritized sentence generator
-- a transcript-inspired 45-minute study routine
-- downloadable audio tracks designed for repeated listening and shadowing
-- study-pack files that include the routine, focus verbs, CSV, JSON, and audio
-
-## API and env handling
+## Environment variables
 
 This app loads environment variables in this order:
 
 1. `daily-language-practice/.env`
 2. `/Users/Kwadwo/Documents/PROJECTS/NITA-bill-review/.env`
 
-The current build uses `HF_TOKEN` for both generation and audio. It loads environment variables in this order, then calls Hugging Face Inference directly for the two audited model IDs above.
+App-side variables:
+
+- `HF_TOKEN`: required for Qwen sentence generation
+- `MODAL_TTS_BASE_URL`: required for the Modal TTS endpoint base URL
+- `MODAL_TTS_AUTH_TOKEN`: bearer token sent to the Modal TTS service
+- `MODAL_TTS_TIMEOUT_SECONDS`: optional request timeout override for TTS calls
+
+Modal-side variables:
+
+- `MODAL_TTS_AUTH_TOKEN`: optional bearer token expected by the Modal service
+
+This repo currently expects that Modal secret to be attached from a secret named `language-learning-bearer`.
 
 ## Run locally
 
@@ -55,9 +56,35 @@ uv sync
 uv run python app.py
 ```
 
+## Deploy the Modal TTS service
+
+The repo includes [`modal_tts_service.py`](/Users/Kwadwo/Documents/PROJECTS/HF-Build-Small/daily-language-practice/modal_tts_service.py), which serves `kyutai/tts-1.6b-en_fr` behind:
+
+- `GET /healthz`
+- `POST /synthesize-track`
+
+Deploy it with:
+
+```bash
+uv run --with modal modal deploy modal_tts_service.py
+```
+
+The deployed function attaches the Modal secret named `language-learning-bearer`, which must contain `MODAL_TTS_AUTH_TOKEN`.
+
+The request body for `POST /synthesize-track` is:
+
+```json
+{
+  "sentences": ["Bonjour.", "Comment allez-vous ?"],
+  "slow_audio": false
+}
+```
+
+The response is raw `audio/wav` bytes for the concatenated track.
+
 ## Notes
 
-- Default target language: `French`
-- The generated ZIP includes JSON, CSV, a text summary, a daily routine file, a focus-verbs file, and the MP3 tracks.
-- The app groups audio into files of up to `20` sentences each.
-- If `HF_TOKEN` is unavailable, the app fails with a clear setup message rather than silently inventing output.
+- The generated ZIP includes JSON, CSV, a text summary, a daily routine file, a focus-verbs file, and the WAV tracks.
+- Preview audio uses the first generated WAV track.
+- If `HF_TOKEN` is unavailable, generation fails with a clear setup message.
+- If the Modal TTS endpoint is unavailable or misconfigured, the app fails with a clear Gradio error instead of silently falling back to the old Hugging Face routed Kokoro path.
