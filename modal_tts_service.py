@@ -90,7 +90,7 @@ def fastapi_app():
     from moshi.models.tts import TTSModel
 
     state: dict[str, object] = {}
-    web_app = FastAPI(title="Daily Language Practice TTS")
+    web_app = FastAPI(title="LingoShadow - Daily Language Practice TTS")
 
     def synthesize_sentence(text: str, slow_audio: bool) -> np.ndarray:
         tts_model: TTSModel = state["tts_model"]  # type: ignore[assignment]

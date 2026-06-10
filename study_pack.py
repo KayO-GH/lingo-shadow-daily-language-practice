@@ -1,9 +1,10 @@
-"""Core generation and packaging logic for the Daily Language Practice app."""
+"""Core generation and packaging logic for the LingoShadow - Daily Language Practice app."""
 
 from __future__ import annotations
 
 import csv
 import json
+import logging
 import os
 import re
 import shutil
@@ -22,6 +23,8 @@ from uuid import uuid4
 from dotenv import load_dotenv
 from huggingface_hub import InferenceClient
 
+logger = logging.getLogger(__name__)
+
 PROJECT_ROOT = Path(__file__).resolve().parent
 DEFAULT_FALLBACK_ENV_PATH = Path("/Users/Kwadwo/Documents/PROJECTS/NITA-bill-review/.env")
 OUTPUT_ROOT = Path(tempfile.gettempdir()) / "daily_language_practice"
@@ -29,11 +32,29 @@ SENTENCES_PER_AUDIO_FILE = 20
 TARGET_LANGUAGE = "French"
 NATIVE_LANGUAGE_CHOICES = ["English", "French", "Spanish", "German", "Portuguese"]
 
-HF_GENERATION_MODEL = "Qwen/Qwen3-8B"
+GENERATION_MODEL_OPTIONS = {
+    "tiny-aya-global": {
+        "id": "CohereLabs/tiny-aya-global",
+        "params": 3_350_000_000,
+    },
+    "qwen3-8b": {
+        "id": "Qwen/Qwen3-8B",
+        "params": 8_200_000_000,
+    },
+}
+TRANSLATION_MODEL_OPTIONS = {
+    "tiny-aya-global": {
+        "id": "CohereLabs/tiny-aya-global",
+        "params": 3_350_000_000,
+    },
+}
+DEFAULT_GENERATION_MODEL_KEY = "qwen3-8b"
+GENERATION_MODEL_ENV_VAR = "LANGUAGE_PRACTICE_GENERATION_MODEL"
+DEFAULT_TRANSLATION_MODEL_KEY = "tiny-aya-global"
+TRANSLATION_MODEL_ENV_VAR = "LANGUAGE_PRACTICE_TRANSLATION_MODEL"
 MODAL_TTS_MODEL = "kyutai/tts-1.6b-en_fr"
 MODAL_TTS_VOICE_REPO = "kyutai/tts-voices"
 MODAL_TTS_VOICE = "voice-donations/Hugo_the_frenchie_enhanced.wav"
-HF_GENERATION_PARAMS = 8_200_000_000
 MODAL_TTS_PARAMS = 1_800_000_000
 MODAL_TTS_TIMEOUT_SECONDS = 120.0
 FRENCH_ONLY_ERROR = "This v1 build currently supports French only."
@@ -41,10 +62,58 @@ MACOS_FRENCH_VOICE_CANDIDATES = ("Amélie", "Thomas")
 AUDIO_SENTENCE_PAUSE_SECONDS = 2.0
 DEFAULT_MACOS_SPEECH_RATE = 180
 SLOW_AUDIO_SPEED_MULTIPLIER = 0.9
+HF_GENERATION_ATTEMPTS_PER_BATCH = 3
+TRANSLATION_ATTEMPTS_PER_BATCH = 3
 
 SUPPORTED_LANGUAGES: dict[str, dict[str, str]] = {
     TARGET_LANGUAGE: {"tts_code": "fr", "language_label": TARGET_LANGUAGE},
 }
+
+
+def _resolve_generation_model_key() -> str:
+    configured_value = os.getenv(GENERATION_MODEL_ENV_VAR, "").strip()
+    if not configured_value:
+        return DEFAULT_GENERATION_MODEL_KEY
+
+    normalized_value = configured_value.casefold()
+    for key, config in GENERATION_MODEL_OPTIONS.items():
+        if normalized_value == key.casefold() or normalized_value == str(config["id"]).casefold():
+            return key
+
+    logger.warning(
+        "Unknown generation model override %r in %s. Falling back to %s.",
+        configured_value,
+        GENERATION_MODEL_ENV_VAR,
+        DEFAULT_GENERATION_MODEL_KEY,
+    )
+    return DEFAULT_GENERATION_MODEL_KEY
+
+
+def _resolve_translation_model_key() -> str:
+    configured_value = os.getenv(TRANSLATION_MODEL_ENV_VAR, "").strip()
+    if not configured_value:
+        return DEFAULT_TRANSLATION_MODEL_KEY
+
+    normalized_value = configured_value.casefold()
+    for key, config in TRANSLATION_MODEL_OPTIONS.items():
+        if normalized_value == key.casefold() or normalized_value == str(config["id"]).casefold():
+            return key
+
+    logger.warning(
+        "Unknown translation model override %r in %s. Falling back to %s.",
+        configured_value,
+        TRANSLATION_MODEL_ENV_VAR,
+        DEFAULT_TRANSLATION_MODEL_KEY,
+    )
+    return DEFAULT_TRANSLATION_MODEL_KEY
+
+
+ACTIVE_GENERATION_MODEL_KEY = _resolve_generation_model_key()
+HF_GENERATION_MODEL = str(GENERATION_MODEL_OPTIONS[ACTIVE_GENERATION_MODEL_KEY]["id"])
+HF_GENERATION_PARAMS = int(GENERATION_MODEL_OPTIONS[ACTIVE_GENERATION_MODEL_KEY]["params"])
+ACTIVE_TRANSLATION_MODEL_KEY = _resolve_translation_model_key()
+TRANSLATION_MODEL = str(TRANSLATION_MODEL_OPTIONS[ACTIVE_TRANSLATION_MODEL_KEY]["id"])
+TRANSLATION_MODEL_PARAMS = int(TRANSLATION_MODEL_OPTIONS[ACTIVE_TRANSLATION_MODEL_KEY]["params"])
 
 
 @dataclass(slots=True)
@@ -81,6 +150,10 @@ class StudyPackBundle:
     preview_audio_path: Path
     cards: list[SentenceCard]
     tts_backend_label: str
+
+
+class GenerationPlanError(RuntimeError):
+    """Raised when the model repeatedly returns unusable structured output."""
 
 
 @dataclass(slots=True)
@@ -123,9 +196,10 @@ def ensure_supported_target_language(language_name: str) -> None:
 
 
 def get_model_stack_summary() -> str:
-    total_params = HF_GENERATION_PARAMS + MODAL_TTS_PARAMS
+    total_params = HF_GENERATION_PARAMS + TRANSLATION_MODEL_PARAMS + MODAL_TTS_PARAMS
     return (
         f"{HF_GENERATION_MODEL} ({HF_GENERATION_PARAMS:,} params) + "
+        f"{TRANSLATION_MODEL} ({TRANSLATION_MODEL_PARAMS:,} params) + "
         f"{MODAL_TTS_MODEL} (~{MODAL_TTS_PARAMS:,} params) = ~{total_params:,} total params"
     )
 
@@ -230,10 +304,18 @@ Each sentence object must include:
 Important rules:
 - Write source_sentence in {native_language}.
 - Write target_sentence in {target_language}.
+- Write verb_lemma in English infinitive form starting with "to " regardless of the source language, for example "to go" or "to explain".
 - pronunciation_hint should be empty unless it helps an {native_language} speaker pronounce the sentence.
 - Do not use placeholders such as [name] or [place].
 - Prefer portable, reusable lines that a learner can adapt in many settings.
 - Build the routine around a solo learner using these materials daily.
+- Every sentence in the batch must be meaningfully distinct in scenario, action, and wording.
+- Avoid generic filler questions and repeated help-request formulas unless the learner's use case clearly requires them.
+- Ground the sentences in the learner's actual routines such as work-from-home, groceries, neighbors, food ordering, travel help, taxis, schedules, and errands.
+- Prefer concrete, high-frequency daily-life lines over vague placeholders.
+- Avoid underspecified sentences such as "Can you help me with this?" unless the object is explicit.
+- Prefer natural spoken {native_language} that a real person would actually say in daily life.
+- If a line sounds stiff, bureaucratic, or too literal in {native_language}, rewrite it into a more natural spoken version before producing the final sentence pair.
 """.strip()
 
     user_prompt = f"""
@@ -245,12 +327,17 @@ Build batch {batch_index} of {total_batches} now.
 
     used_verbs = used_verbs or []
     used_target_sentences = used_target_sentences or []
+    if batch_index > 1:
+        user_prompt += (
+            "\n\nThis is a top-up batch. Return only brand-new sentences that do not overlap with any prior sentence,"
+            " prior verb, or prior scenario."
+        )
     if used_verbs:
-        user_prompt += "\n\nAlready covered verbs to avoid repeating too much:\n- " + "\n- ".join(used_verbs[:20])
+        user_prompt += "\n\nAlready covered verbs that you must avoid reusing:\n- " + "\n- ".join(used_verbs[:40])
     if used_target_sentences:
         user_prompt += (
-            "\n\nAlready covered target sentences to avoid duplicating:\n- "
-            + "\n- ".join(used_target_sentences[:12])
+            "\n\nAlready covered target sentences that you must not repeat or paraphrase closely:\n- "
+            + "\n- ".join(used_target_sentences[:40])
         )
 
     return system_prompt, user_prompt
@@ -276,6 +363,18 @@ def estimate_generation_max_tokens(sentence_count: int) -> int:
     return min(8192, max(3200, 1800 + (sentence_count * 180)))
 
 
+def _model_supports_native_json_response_format(model_name: str) -> bool:
+    normalized_name = model_name.casefold()
+    return "tiny-aya" not in normalized_name
+
+
+def _default_generation_batch_size(model_name: str) -> int:
+    normalized_name = model_name.casefold()
+    if "tiny-aya" in normalized_name:
+        return 10
+    return 20
+
+
 def _merge_unique_text(base_items: list[str], additions: list[str], limit: int | None = None) -> list[str]:
     merged = list(base_items)
     seen = {item.casefold() for item in merged}
@@ -289,12 +388,209 @@ def _merge_unique_text(base_items: list[str], additions: list[str], limit: int |
     return merged
 
 
+def _extract_text_from_content_block(content: Any) -> str:
+    if isinstance(content, str):
+        return _clean_text(content)
+
+    if isinstance(content, dict):
+        text_value = content.get("text")
+        if isinstance(text_value, dict):
+            return _clean_text(
+                text_value.get("value") or text_value.get("content") or text_value.get("text")
+            )
+        return _clean_text(text_value or content.get("content") or content.get("value"))
+
+    text_attr = getattr(content, "text", None)
+    if isinstance(text_attr, str):
+        return _clean_text(text_attr)
+
+    value_attr = getattr(content, "value", None)
+    if isinstance(value_attr, str):
+        return _clean_text(value_attr)
+
+    return ""
+
+
+def _extract_response_text(response: Any) -> str:
+    choices = getattr(response, "choices", None) or []
+    if not choices:
+        return ""
+
+    message = getattr(choices[0], "message", None)
+    if message is None:
+        return ""
+
+    content = getattr(message, "content", None)
+    if isinstance(content, list):
+        parts = [_extract_text_from_content_block(item) for item in content]
+        return "\n".join(part for part in parts if part).strip()
+
+    return _extract_text_from_content_block(content)
+
+
+def _build_translation_prompt(
+    source_sentences: list[str],
+    target_language: str,
+    native_language: str,
+) -> tuple[str, str]:
+    system_prompt = f"""
+You are a precise translation engine for language-learning content.
+
+Translate each sentence from {native_language} into natural {target_language}.
+
+Rules:
+- Return strict JSON only.
+- Keep the same number of sentences and the same order.
+- Translate only the sentence text. Do not add notes, explanations, or transliterations.
+- Preserve the exact meaning first.
+- Preserve who is doing the action.
+- Preserve the sentence type:
+  - "Can you..." must stay a request to "you"
+  - "Can I..." must stay a request about "I"
+  - "Can we..." must stay about "we"
+  - "I need to..." must stay a statement of necessity
+- Use the most natural everyday {target_language} a learner would actually say.
+- Prefer natural spoken {target_language} over stiff or overly literal phrasing.
+- If a literal translation sounds unnatural, translate the intended meaning instead.
+- Do not make the sentence more vague, more polite, or more indirect than the original unless {target_language} requires it.
+- Do not replace the subject or change the action.
+- For idioms or common expressions, translate the meaning, not the words.
+- When English uses an awkward support phrase like "Can I get help..." or "Can you help me with...", prefer the most natural spoken request in {target_language} that preserves the original meaning.
+- Do not collapse multiple inputs into one sentence.
+
+Examples:
+- English: Can you confirm my meeting time?
+  French: Pouvez-vous confirmer l'heure de ma réunion ?
+- English: Can you tell me how to get there?
+  French: Pouvez-vous me dire comment y aller ?
+- English: Can you share your schedule?
+  French: Pouvez-vous partager votre emploi du temps ?
+- English: I need to hurry.
+  French: Je dois me dépêcher.
+- English: Can I get help finding this?
+  French: Pouvez-vous m’aider à trouver ceci ?
+- English: Can you help me with the taxi?
+  French: Pouvez-vous m’aider avec le taxi ?
+
+Return a JSON object with this exact shape:
+{{
+  "translations": ["...", "..."]
+}}
+""".strip()
+    user_prompt = f"""
+Translate these {native_language} sentences into natural everyday {target_language}.
+Keep the same order and return one translation per input sentence.
+
+Sentences:
+{json.dumps(source_sentences, ensure_ascii=False)}
+""".strip()
+    return system_prompt, user_prompt
+
+
+def _extract_translation_list(payload: Any, expected_count: int) -> list[str]:
+    if isinstance(payload, dict):
+        raw_translations = payload.get("translations", [])
+    elif isinstance(payload, list):
+        raw_translations = payload
+    else:
+        raise ValueError("Unexpected translation payload shape.")
+
+    if not isinstance(raw_translations, list):
+        raise ValueError("Translation payload did not include a translations list.")
+
+    translations = []
+    for item in raw_translations:
+        cleaned_item = _clean_text(item)
+        if not cleaned_item:
+            continue
+        cleaned_item = re.sub(r"^\d+[\).\-\s]+", "", cleaned_item).strip()
+        translations.append(cleaned_item)
+    if len(translations) != expected_count:
+        raise ValueError(
+            f"Expected {expected_count} translations but received {len(translations)}."
+        )
+    return translations
+
+
+def _request_translations(
+    client: InferenceClient,
+    source_sentences: list[str],
+    target_language: str,
+    native_language: str,
+) -> list[str]:
+    system_prompt, user_prompt = _build_translation_prompt(
+        source_sentences=source_sentences,
+        target_language=target_language,
+        native_language=native_language,
+    )
+    last_error: Exception | None = None
+    request_kwargs = {
+        "model": TRANSLATION_MODEL,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "temperature": 0.2,
+        "max_tokens": max(800, len(source_sentences) * 120),
+    }
+
+    for attempt_index in range(1, TRANSLATION_ATTEMPTS_PER_BATCH + 1):
+        try:
+            response = client.chat_completion(**request_kwargs)
+            raw_text = _extract_response_text(response)
+            if not raw_text:
+                raise ValueError("The translation response did not include text output.")
+            payload = extract_json_payload(raw_text)
+            return _extract_translation_list(payload, expected_count=len(source_sentences))
+        except (AttributeError, IndexError, TypeError, ValueError) as exc:
+            last_error = exc
+            logger.warning(
+                "Translation model returned unusable output on attempt %s/%s: %s",
+                attempt_index,
+                TRANSLATION_ATTEMPTS_PER_BATCH,
+                exc,
+            )
+
+    raise RuntimeError("The translation model kept returning incomplete output.") from last_error
+
+
+def translate_sentence_cards(
+    cards: list[SentenceCard],
+    target_language: str,
+    native_language: str,
+    client: InferenceClient,
+    batch_size: int = 10,
+) -> list[SentenceCard]:
+    translated_cards: list[SentenceCard] = []
+    for batch_start in range(0, len(cards), batch_size):
+        card_batch = cards[batch_start : batch_start + batch_size]
+        translations = _request_translations(
+            client=client,
+            source_sentences=[card.source_sentence for card in card_batch],
+            target_language=target_language,
+            native_language=native_language,
+        )
+        for card, translation in zip(card_batch, translations, strict=True):
+            translated_cards.append(
+                SentenceCard(
+                    scenario=card.scenario,
+                    source_sentence=card.source_sentence,
+                    target_sentence=translation,
+                    verb_lemma=card.verb_lemma,
+                    why_it_is_useful=card.why_it_is_useful,
+                    pronunciation_hint=card.pronunciation_hint,
+                )
+            )
+    return translated_cards
+
+
 def _request_generation_plan(
     client: InferenceClient,
     use_cases: str,
     target_language: str,
     native_language: str,
     sentence_count: int,
+    minimum_usable_sentences: int | None = None,
     used_verbs: list[str] | None = None,
     used_target_sentences: list[str] | None = None,
     batch_index: int = 1,
@@ -311,29 +607,70 @@ def _request_generation_plan(
         total_batches=total_batches,
     )
 
-    response = client.chat_completion(
-        model=HF_GENERATION_MODEL,
-        messages=[
+    last_error: Exception | None = None
+    request_kwargs = {
+        "model": HF_GENERATION_MODEL,
+        "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
-        temperature=0.4,
-        max_tokens=estimate_generation_max_tokens(sentence_count),
-        response_format={"type": "json_object"},
-    )
+        "temperature": 0.7 if "tiny-aya" in HF_GENERATION_MODEL.casefold() and batch_index > 1 else 0.4,
+        "max_tokens": estimate_generation_max_tokens(sentence_count),
+    }
+    if _model_supports_native_json_response_format(HF_GENERATION_MODEL):
+        request_kwargs["response_format"] = {"type": "json_object"}
 
-    raw_text = response.choices[0].message.content if response.choices else ""
-    if not raw_text:
-        raise RuntimeError("The HF generation response did not include text output.")
+    for attempt_index in range(1, HF_GENERATION_ATTEMPTS_PER_BATCH + 1):
+        try:
+            response = client.chat_completion(**request_kwargs)
 
-    payload = extract_json_payload(raw_text)
-    return normalize_plan(payload, sentence_count=sentence_count)
+            raw_text = _extract_response_text(response)
+            if not raw_text:
+                raise ValueError("The HF generation response did not include text output.")
+
+            payload = extract_json_payload(raw_text)
+            return normalize_plan(
+                payload,
+                sentence_count=sentence_count,
+                minimum_usable_sentences=minimum_usable_sentences,
+            )
+        except (AttributeError, IndexError, TypeError, ValueError) as exc:
+            last_error = exc
+            logger.warning(
+                "HF generation returned unusable output on attempt %s/%s for batch %s/%s: %s",
+                attempt_index,
+                HF_GENERATION_ATTEMPTS_PER_BATCH,
+                batch_index,
+                total_batches,
+                exc,
+            )
+
+    raise GenerationPlanError("The language model kept returning incomplete output for this batch.") from last_error
 
 
 def _clean_text(value: Any) -> str:
     if value is None:
         return ""
     return re.sub(r"\s+", " ", str(value)).strip()
+
+
+def _normalize_english_infinitive(verb: Any) -> str:
+    cleaned = _clean_text(verb)
+    if not cleaned:
+        return ""
+
+    cleaned = re.sub(r"^[\"'`]+|[\"'`]+$", "", cleaned).strip()
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    lowered = cleaned.casefold()
+    if lowered.startswith("to "):
+        base = cleaned[3:].strip()
+    else:
+        base = cleaned
+
+    if not base:
+        return ""
+
+    return f"to {base.lower()}"
 
 
 def _default_modal_tts_transport(url: str, payload: bytes, headers: dict[str, str], timeout: float) -> bytes:
@@ -439,7 +776,11 @@ def default_study_routine() -> list[StudyRoutineStep]:
     ]
 
 
-def normalize_plan(payload: Any, sentence_count: int) -> GeneratedStudyPlan:
+def normalize_plan(
+    payload: Any,
+    sentence_count: int,
+    minimum_usable_sentences: int | None = None,
+) -> GeneratedStudyPlan:
     if isinstance(payload, list):
         rationale = ""
         assumptions: list[str] = []
@@ -449,7 +790,11 @@ def normalize_plan(payload: Any, sentence_count: int) -> GeneratedStudyPlan:
     elif isinstance(payload, dict):
         rationale = _clean_text(payload.get("rationale"))
         assumptions = [_clean_text(item) for item in payload.get("assumptions", []) if _clean_text(item)]
-        focus_verbs = [_clean_text(item) for item in payload.get("focus_verbs", []) if _clean_text(item)]
+        focus_verbs = []
+        for item in payload.get("focus_verbs", []):
+            normalized_item = _normalize_english_infinitive(item)
+            if normalized_item:
+                focus_verbs.append(normalized_item)
         routine_steps = []
         for item in payload.get("study_routine", payload.get("routine", [])):
             if not isinstance(item, dict):
@@ -482,7 +827,7 @@ def normalize_plan(payload: Any, sentence_count: int) -> GeneratedStudyPlan:
             scenario=_clean_text(raw_card.get("scenario") or raw_card.get("situation")),
             source_sentence=_clean_text(raw_card.get("source_sentence") or raw_card.get("english_sentence")),
             target_sentence=_clean_text(raw_card.get("target_sentence") or raw_card.get("translation")),
-            verb_lemma=_clean_text(raw_card.get("verb_lemma") or raw_card.get("verb")),
+            verb_lemma=_normalize_english_infinitive(raw_card.get("verb_lemma") or raw_card.get("verb")),
             why_it_is_useful=_clean_text(raw_card.get("why_it_is_useful") or raw_card.get("utility")),
             pronunciation_hint=_clean_text(raw_card.get("pronunciation_hint")),
         )
@@ -499,7 +844,8 @@ def normalize_plan(payload: Any, sentence_count: int) -> GeneratedStudyPlan:
         if len(cards) == sentence_count:
             break
 
-    if len(cards) < max(4, min(8, sentence_count // 2)):
+    usable_threshold = minimum_usable_sentences if minimum_usable_sentences is not None else max(4, min(8, sentence_count // 2))
+    if len(cards) < usable_threshold:
         raise ValueError("The model returned too few usable sentences.")
 
     if not focus_verbs:
@@ -546,7 +892,7 @@ def generate_sentence_cards(
     if client is None:
         client = InferenceClient(api_key=api_key)
 
-    batch_size_limit = 20
+    batch_size_limit = _default_generation_batch_size(HF_GENERATION_MODEL)
     total_batches = max(1, (sentence_count + batch_size_limit - 1) // batch_size_limit)
     extra_retry_budget = 3
     planned_batches = total_batches + extra_retry_budget
@@ -555,6 +901,7 @@ def generate_sentence_cards(
     collected_assumptions: list[str] = []
     routine_steps: list[StudyRoutineStep] = []
     rationale = ""
+    batch_failures = 0
 
     for batch_index in range(1, planned_batches + 1):
         remaining = sentence_count - len(collected_cards)
@@ -562,17 +909,29 @@ def generate_sentence_cards(
             break
 
         requested_count = min(batch_size_limit, max(remaining, 8))
-        batch_plan = _request_generation_plan(
-            client=client,
-            use_cases=use_cases,
-            target_language=target_language,
-            native_language=native_language,
-            sentence_count=requested_count,
-            used_verbs=collected_verbs,
-            used_target_sentences=[card.target_sentence for card in collected_cards],
-            batch_index=batch_index,
-            total_batches=planned_batches,
-        )
+        minimum_usable_sentences = min(remaining, max(4, min(8, requested_count // 2)))
+        try:
+            batch_plan = _request_generation_plan(
+                client=client,
+                use_cases=use_cases,
+                target_language=target_language,
+                native_language=native_language,
+                sentence_count=requested_count,
+                minimum_usable_sentences=minimum_usable_sentences,
+                used_verbs=collected_verbs,
+                used_target_sentences=[card.target_sentence for card in collected_cards],
+                batch_index=batch_index,
+                total_batches=planned_batches,
+            )
+        except GenerationPlanError as exc:
+            batch_failures += 1
+            logger.warning(
+                "Skipping failed generation batch %s/%s after repeated unusable HF output: %s",
+                batch_index,
+                planned_batches,
+                exc,
+            )
+            continue
 
         if not rationale:
             rationale = batch_plan.rationale
@@ -591,12 +950,25 @@ def generate_sentence_cards(
                 break
 
     if len(collected_cards) < sentence_count:
+        if batch_failures:
+            raise RuntimeError(
+                f"Only generated {len(collected_cards)} unique sentences out of the requested {sentence_count}. "
+                "The language model returned incomplete output on some attempts. Try again or reduce the sentence count."
+            )
         raise RuntimeError(
-            f"Only generated {len(collected_cards)} unique sentences out of the requested {sentence_count}."
+            f"Only generated {len(collected_cards)} unique sentences out of the requested {sentence_count}. "
+            "Try again or reduce the sentence count."
         )
 
     if not collected_verbs:
         collected_verbs = _merge_unique_text([], [card.verb_lemma for card in collected_cards], limit=12)
+
+    translated_cards = translate_sentence_cards(
+        cards=collected_cards[:sentence_count],
+        target_language=target_language,
+        native_language=native_language,
+        client=client,
+    )
 
     return GeneratedStudyPlan(
         rationale=rationale or (
@@ -606,7 +978,7 @@ def generate_sentence_cards(
         assumptions=collected_assumptions or ["The learner wants practical spoken sentences before formal grammar study."],
         focus_verbs=collected_verbs,
         routine_steps=routine_steps or default_study_routine(),
-        cards=collected_cards[:sentence_count],
+        cards=translated_cards,
     )
 
 
