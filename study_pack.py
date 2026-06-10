@@ -14,14 +14,18 @@ from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
 
-import cohere
 from dotenv import load_dotenv
-from gtts import gTTS
+from huggingface_hub import InferenceClient
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 DEFAULT_FALLBACK_ENV_PATH = Path("/Users/Kwadwo/Documents/PROJECTS/NITA-bill-review/.env")
 OUTPUT_ROOT = Path(tempfile.gettempdir()) / "daily_language_practice"
 SENTENCES_PER_AUDIO_FILE = 20
+HF_GENERATION_MODEL = "Qwen/Qwen2.5-7B-Instruct"
+HF_TTS_MODEL = "hexgrad/Kokoro-82M"
+HF_TTS_VOICE = "af_heart"
+HF_GENERATION_PARAMS = 7_615_616_512
+HF_TTS_PARAMS = 82_000_000
 
 SUPPORTED_LANGUAGES: dict[str, dict[str, str]] = {
     "French": {"tts_code": "fr", "language_label": "French"},
@@ -71,6 +75,14 @@ class StudyPackBundle:
     audio_paths: list[Path]
     preview_audio_path: Path
     cards: list[SentenceCard]
+
+
+def get_model_stack_summary() -> str:
+    total_params = HF_GENERATION_PARAMS + HF_TTS_PARAMS
+    return (
+        f"{HF_GENERATION_MODEL} ({HF_GENERATION_PARAMS:,} params) + "
+        f"{HF_TTS_MODEL} ({HF_TTS_PARAMS:,} params) = {total_params:,} total params"
+    )
 
 
 def load_environment() -> Path | None:
@@ -208,7 +220,7 @@ def _merge_unique_text(base_items: list[str], additions: list[str], limit: int |
 
 
 def _request_generation_plan(
-    client: cohere.Client,
+    client: InferenceClient,
     use_cases: str,
     target_language: str,
     native_language: str,
@@ -229,16 +241,20 @@ def _request_generation_plan(
         total_batches=total_batches,
     )
 
-    response = client.chat(
-        message=user_prompt,
-        preamble=system_prompt,
+    response = client.chat_completion(
+        model=HF_GENERATION_MODEL,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
         temperature=0.4,
         max_tokens=estimate_generation_max_tokens(sentence_count),
+        response_format={"type": "json_object"},
     )
 
-    raw_text = getattr(response, "text", "")
+    raw_text = response.choices[0].message.content if response.choices else ""
     if not raw_text:
-        raise RuntimeError("The Cohere response did not include text output.")
+        raise RuntimeError("The HF generation response did not include text output.")
 
     payload = extract_json_payload(raw_text)
     return normalize_plan(payload, sentence_count=sentence_count)
@@ -366,39 +382,42 @@ def generate_sentence_cards(
     target_language: str,
     native_language: str,
     sentence_count: int,
-    client: cohere.Client | None = None,
+    client: InferenceClient | None = None,
 ) -> GeneratedStudyPlan:
     load_environment()
-    api_key = os.getenv("COHERE_API_KEY", "").strip()
+    api_key = os.getenv("HF_TOKEN", "").strip()
     if not api_key and client is None:
-        raise RuntimeError("Missing COHERE_API_KEY. Add it to .env or to the fallback env file.")
+        raise RuntimeError("Missing HF_TOKEN. Add it to .env or to the fallback env file.")
 
     if client is None:
-        client = cohere.Client(api_key)
+        client = InferenceClient(api_key=api_key)
 
     batch_size_limit = 20
     total_batches = max(1, (sentence_count + batch_size_limit - 1) // batch_size_limit)
+    extra_retry_budget = 3
+    planned_batches = total_batches + extra_retry_budget
     collected_cards: list[SentenceCard] = []
     collected_verbs: list[str] = []
     collected_assumptions: list[str] = []
     routine_steps: list[StudyRoutineStep] = []
     rationale = ""
 
-    for batch_index in range(1, total_batches + 1):
+    for batch_index in range(1, planned_batches + 1):
         remaining = sentence_count - len(collected_cards)
         if remaining <= 0:
             break
 
+        requested_count = min(batch_size_limit, max(remaining, 8))
         batch_plan = _request_generation_plan(
             client=client,
             use_cases=use_cases,
             target_language=target_language,
             native_language=native_language,
-            sentence_count=min(batch_size_limit, remaining),
+            sentence_count=requested_count,
             used_verbs=collected_verbs,
             used_target_sentences=[card.target_sentence for card in collected_cards],
             batch_index=batch_index,
-            total_batches=total_batches,
+            total_batches=planned_batches,
         )
 
         if not rationale:
@@ -443,8 +462,20 @@ def sanitize_filename(text: str) -> str:
 
 
 def default_tts_writer(text: str, lang_code: str, destination: Path, slow_audio: bool) -> None:
-    tts = gTTS(text=text, lang=lang_code, slow=slow_audio)
-    tts.save(str(destination))
+    del lang_code
+
+    api_key = os.getenv("HF_TOKEN", "").strip()
+    if not api_key:
+        raise RuntimeError("Missing HF_TOKEN. Add it to .env or to the fallback env file.")
+
+    voice = os.getenv("HF_TTS_VOICE", HF_TTS_VOICE).strip() or HF_TTS_VOICE
+    client = InferenceClient(api_key=api_key)
+    audio_bytes = client.text_to_speech(
+        text,
+        model=HF_TTS_MODEL,
+        extra_body={"voice": voice, "speed": 0.85 if slow_audio else 1.0},
+    )
+    destination.write_bytes(audio_bytes)
 
 
 def chunk_cards(cards: list[SentenceCard], chunk_size: int = SENTENCES_PER_AUDIO_FILE) -> list[list[SentenceCard]]:
@@ -512,6 +543,7 @@ def create_study_pack(
         f"Sentence count: {len(cards)}",
         f"Audio track count: {len(audio_paths)}",
         f"Sentences per audio file: up to {SENTENCES_PER_AUDIO_FILE}",
+        f"Model stack: {get_model_stack_summary()}",
         "",
         "Focus verbs:",
     ]

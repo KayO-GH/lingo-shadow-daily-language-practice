@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from study_pack import (
     SENTENCES_PER_AUDIO_FILE,
@@ -9,6 +10,8 @@ from study_pack import (
     StudyRoutineStep,
     create_study_pack,
     extract_json_payload,
+    generate_sentence_cards,
+    get_model_stack_summary,
     normalize_plan,
 )
 
@@ -170,3 +173,68 @@ def test_create_study_pack_batches_every_twenty_sentences(tmp_path: Path) -> Non
     assert bundle.audio_paths[1].name == "02_sentences_21_21.mp3"
     assert calls[0].count("\n") == SENTENCES_PER_AUDIO_FILE - 1
     assert calls[1] == "Target sentence 21"
+
+
+def test_model_stack_summary_mentions_both_models() -> None:
+    summary = get_model_stack_summary()
+    assert "Qwen/Qwen2.5-7B-Instruct" in summary
+    assert "hexgrad/Kokoro-82M" in summary
+
+
+def test_generate_sentence_cards_retries_until_requested_count() -> None:
+    first_batch = {
+        "rationale": "Use daily situations.",
+        "assumptions": ["The learner wants practical phrases."],
+        "focus_verbs": ["aller", "payer", "demander"],
+        "study_routine": [
+            {"title": "Preview", "minutes": 10, "instructions": "Scan verbs."},
+            {"title": "Listen", "minutes": 20, "instructions": "Shadow audio."},
+            {"title": "Speak", "minutes": 15, "instructions": "Recall from prompts."},
+        ],
+        "sentences": [
+            {
+                "scenario": f"Scenario {index}",
+                "source_sentence": f"Source {index}",
+                "target_sentence": "Target 1" if index == 20 else f"Target {index}",
+                "verb_lemma": f"verb_{index}",
+                "why_it_is_useful": "Useful daily sentence.",
+                "pronunciation_hint": "",
+            }
+            for index in range(1, 21)
+        ],
+    }
+    top_up_batch = {
+        "sentences": [
+            {
+                "scenario": f"Top up {index}",
+                "source_sentence": f"Top source {index}",
+                "target_sentence": f"Top target {index}",
+                "verb_lemma": f"top_verb_{index}",
+                "why_it_is_useful": "Top-up sentence.",
+                "pronunciation_hint": "",
+            }
+            for index in range(1, 9)
+        ]
+    }
+
+    class StubClient:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def chat_completion(self, **_: object) -> SimpleNamespace:
+            self.calls += 1
+            payload = first_batch if self.calls == 1 else top_up_batch
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))]
+            )
+
+    plan = generate_sentence_cards(
+        use_cases="I need French for errands and daily conversations.",
+        target_language="French",
+        native_language="English",
+        sentence_count=20,
+        client=StubClient(),
+    )
+
+    assert len(plan.cards) == 20
+    assert plan.cards[-1].target_sentence == "Top target 1"

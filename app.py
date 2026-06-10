@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import os
-import socket
 
 import gradio as gr
 
 from study_pack import (
+    HF_GENERATION_MODEL,
+    HF_GENERATION_PARAMS,
+    HF_TTS_MODEL,
+    HF_TTS_PARAMS,
     GeneratedStudyPlan,
     SENTENCES_PER_AUDIO_FILE,
     build_results_rows,
@@ -20,7 +23,7 @@ from study_pack import (
 APP_TITLE = "Daily Language Practice"
 APP_DESCRIPTION = """
 Turn your real daily routines into a practical language study system.
-Describe the situations you actually live in, choose a target language, and the app will build high-frequency sentences, focus verbs, a 45-minute routine, and downloadable audio tracks.
+Describe the situations you actually live in, choose a target language, and the app will build high-frequency sentences, focus verbs, a 45-minute routine, and downloadable audio tracks with a hackathon-safe small-model stack.
 """.strip()
 
 APP_THEME = gr.themes.Soft(
@@ -56,32 +59,15 @@ APP_CSS = """
 }
 """
 
-
-def _port_is_available(port: int) -> bool:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try:
-            sock.bind(("0.0.0.0", port))
-        except OSError:
-            return False
-        return True
-
-
+MODEL_STACK_MD = (
+    "### Model stack\n"
+    f"- Generation: `{HF_GENERATION_MODEL}` ({HF_GENERATION_PARAMS:,} params)\n"
+    f"- TTS: `{HF_TTS_MODEL}` ({HF_TTS_PARAMS:,} params)\n"
+    f"- Total: **{HF_GENERATION_PARAMS + HF_TTS_PARAMS:,}** params"
+)
 def resolve_server_port() -> int | None:
     explicit = os.getenv("PORT") or os.getenv("GRADIO_SERVER_PORT")
-    if explicit:
-        return int(explicit)
-
-    for candidate in (7860, 7861, 7862, 8860, 8861, 9000):
-        if _port_is_available(candidate):
-            return candidate
-
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.bind(("0.0.0.0", 0))
-            return int(sock.getsockname()[1])
-    except OSError:
-        return 7860
+    return int(explicit) if explicit else None
 
 
 def run_pack_builder(
@@ -113,7 +99,8 @@ def run_pack_builder(
     status_md = (
         f"Built **{len(plan.cards)}** study sentences for **{target_language}** and generated "
         f"**{len(bundle.audio_paths)}** downloadable audio track(s) with up to "
-        f"**{SENTENCES_PER_AUDIO_FILE}** sentences per file."
+        f"**{SENTENCES_PER_AUDIO_FILE}** sentences per file using "
+        f"`{HF_GENERATION_MODEL}` plus `{HF_TTS_MODEL}`."
     )
     rationale_md = f"### Pack logic\n{plan.rationale}"
     assumptions_md = "### Working assumptions\n" + "\n".join(f"- {item}" for item in plan.assumptions)
@@ -148,6 +135,7 @@ def build_app() -> gr.Blocks:
             with gr.Column(elem_id="hero"):
                 gr.Markdown(f"# {APP_TITLE}")
                 gr.Markdown(APP_DESCRIPTION)
+                gr.Markdown(MODEL_STACK_MD)
 
             with gr.Row():
                 with gr.Column(scale=5):

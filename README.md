@@ -2,6 +2,14 @@
 
 `Daily Language Practice` is a standalone Gradio project for building a personalized self-study pack from your real daily-life situations. It combines high-frequency sentences, verb-focused coverage, a simple 45-minute routine, and downloadable target-language audio tracks.
 
+## Hackathon-safe model stack
+
+- Generation: `Qwen/Qwen2.5-7B-Instruct` with `7,615,616,512` parameters
+- TTS: `hexgrad/Kokoro-82M` with `82,000,000` parameters
+- Total model budget: `7,697,616,512` parameters
+
+This keeps the app comfortably inside the Build Small hackathon `<= 32B` total-parameter limit while preserving good text quality and much better audio quality than the previous `gTTS` prototype path.
+
 ## What it does
 
 - asks the learner to describe their general use cases and daily routines
@@ -36,19 +44,20 @@ This app loads environment variables in this order:
 1. `daily-language-practice/.env`
 2. `/Users/Kwadwo/Documents/PROJECTS/NITA-bill-review/.env`
 
-For the current prototype, sentence generation uses `COHERE_API_KEY` when available. Audio generation uses `gTTS`, which does not require a separate API key but does require outbound network access at runtime.
+The current build uses `HF_TOKEN` for both generation and audio. It loads environment variables in this order, then calls Hugging Face Inference directly for the two audited model IDs above.
 
 ## Run locally
 
 ```bash
 uv venv .venv
 source .venv/bin/activate
-uv pip install -e .
-python app.py
+uv sync
+uv run python app.py
 ```
 
 ## Notes
 
 - Default target language: `French`
 - The generated ZIP includes JSON, CSV, a text summary, a daily routine file, a focus-verbs file, and the MP3 tracks.
-- If Cohere is unavailable, the app fails with a clear setup message rather than silently inventing low-quality output.
+- The app groups audio into files of up to `20` sentences each.
+- If `HF_TOKEN` is unavailable, the app fails with a clear setup message rather than silently inventing output.
