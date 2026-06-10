@@ -39,6 +39,8 @@ MODAL_TTS_TIMEOUT_SECONDS = 120.0
 FRENCH_ONLY_ERROR = "This v1 build currently supports French only."
 MACOS_FRENCH_VOICE_CANDIDATES = ("Amélie", "Thomas")
 AUDIO_SENTENCE_PAUSE_SECONDS = 2.0
+DEFAULT_MACOS_SPEECH_RATE = 180
+SLOW_AUDIO_SPEED_MULTIPLIER = 0.9
 
 SUPPORTED_LANGUAGES: dict[str, dict[str, str]] = {
     TARGET_LANGUAGE: {"tts_code": "fr", "language_label": TARGET_LANGUAGE},
@@ -401,7 +403,8 @@ def _write_macos_fallback_wav(
     if not spoken_text:
         raise ValueError("At least one non-empty sentence is required for local fallback audio generation.")
 
-    rate = "150" if slow_audio else "180"
+    target_rate = round(DEFAULT_MACOS_SPEECH_RATE * SLOW_AUDIO_SPEED_MULTIPLIER) if slow_audio else DEFAULT_MACOS_SPEECH_RATE
+    rate = str(target_rate)
     with tempfile.TemporaryDirectory(prefix="daily_language_practice_tts_") as temp_dir:
         temp_aiff = Path(temp_dir) / "track.aiff"
         subprocess.run(

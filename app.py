@@ -62,7 +62,6 @@ APP_CSS = """
 """
 
 MODEL_STACK_MD = (
-    "### Model stack\n"
     f"- Generation: `{HF_GENERATION_MODEL}` ({HF_GENERATION_PARAMS:,} params)\n"
     f"- TTS: `{MODAL_TTS_MODEL}` (~{MODAL_TTS_PARAMS:,} params) via Modal\n"
     f"- Total: **~{HF_GENERATION_PARAMS + MODAL_TTS_PARAMS:,}** params\n"
@@ -136,7 +135,7 @@ def run_pack_builder(
 def build_app() -> gr.Blocks:
     load_environment()
     default_prompt = (
-        "I want to learn French for daily life. I work from home, buy groceries in person, "
+        "I work from home, buy groceries in person, "
         "chat with neighbors, order food, ask for help when traveling, talk about my schedule, "
         "and handle simple errands with shops, taxis, and family."
     )

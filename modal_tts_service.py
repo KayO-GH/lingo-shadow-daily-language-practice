@@ -2,6 +2,7 @@
 
 import io
 import os
+import subprocess
 import wave
 
 import modal
@@ -14,10 +15,12 @@ KYUTAI_TTS_VOICE_REPO = "kyutai/tts-voices"
 KYUTAI_TTS_VOICE = "voice-donations/Hugo_the_frenchie_enhanced.wav"
 KYUTAI_SAMPLE_RATE = 24_000
 SENTENCE_PAUSE_SECONDS = 2.0
+SLOW_AUDIO_SPEED_MULTIPLIER = 0.9
 
 image = (
     modal.Image.debian_slim(python_version="3.12")
     .env({"HF_HOME": HF_CACHE_DIR})
+    .apt_install("ffmpeg")
     .pip_install(
         "fastapi==0.115.13",
         "moshi==0.2.11",
@@ -44,6 +47,33 @@ def _pcm_to_wav_bytes(pcm, sample_rate: int) -> bytes:
     return buffer.getvalue()
 
 
+def _apply_tempo_filter(wav_bytes: bytes, speed_multiplier: float) -> bytes:
+    if speed_multiplier <= 0:
+        raise ValueError("speed_multiplier must be positive.")
+    if speed_multiplier == 1.0:
+        return wav_bytes
+
+    result = subprocess.run(
+        [
+            "ffmpeg",
+            "-loglevel",
+            "error",
+            "-i",
+            "pipe:0",
+            "-filter:a",
+            f"atempo={speed_multiplier}",
+            "-f",
+            "wav",
+            "pipe:1",
+        ],
+        input=wav_bytes,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    return result.stdout
+
+
 @app.function(
     gpu="L40S",
     timeout=900,
@@ -66,9 +96,7 @@ def fastapi_app():
         tts_model: TTSModel = state["tts_model"]  # type: ignore[assignment]
         condition_attributes = state["condition_attributes"]
 
-        # Kyutai does not expose a direct speech-rate knob here, so slower mode
-        # uses more generous script padding and longer inter-sentence pauses.
-        entries = tts_model.prepare_script([text], padding_between=2 if slow_audio else 1)
+        entries = tts_model.prepare_script([text], padding_between=1)
         result = tts_model.generate(
             [entries],
             [condition_attributes],
@@ -144,6 +172,8 @@ def fastapi_app():
 
             pcm = np.concatenate(tracks, axis=-1)
             wav_bytes = _pcm_to_wav_bytes(pcm, KYUTAI_SAMPLE_RATE)
+            if slow_audio_value:
+                wav_bytes = _apply_tempo_filter(wav_bytes, SLOW_AUDIO_SPEED_MULTIPLIER)
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=500, detail=f"TTS synthesis failed: {exc}") from exc
 
