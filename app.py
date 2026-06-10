@@ -7,25 +7,25 @@ import os
 import gradio as gr
 
 from study_pack import (
+    FRENCH_ONLY_ERROR,
+    GeneratedStudyPlan,
     HF_GENERATION_MODEL,
     HF_GENERATION_PARAMS,
-    HF_TTS_MODEL,
-    HF_TTS_PARAMS,
-    GeneratedStudyPlan,
+    MODAL_TTS_MODEL,
+    MODAL_TTS_PARAMS,
     SENTENCES_PER_AUDIO_FILE,
+    TARGET_LANGUAGE,
     build_results_rows,
     create_study_pack,
-    get_default_tts_voice,
     generate_sentence_cards,
-    get_supported_language_labels,
-    get_supported_tts_voices,
+    get_native_language_choices,
     load_environment,
 )
 
 APP_TITLE = "Daily Language Practice"
 APP_DESCRIPTION = """
-Turn your real daily routines into a practical language study system.
-Describe the situations you actually live in, choose a target language, and the app will build high-frequency sentences, focus verbs, a 45-minute routine, and downloadable audio tracks with a hackathon-safe small-model stack.
+Turn your real daily routines into a practical French study system.
+Describe the situations you actually live in and the app will build high-frequency French sentences, focus verbs, a 45-minute routine, and downloadable audio tracks generated through a dedicated Modal-backed French TTS service.
 """.strip()
 
 APP_THEME = gr.themes.Soft(
@@ -64,9 +64,12 @@ APP_CSS = """
 MODEL_STACK_MD = (
     "### Model stack\n"
     f"- Generation: `{HF_GENERATION_MODEL}` ({HF_GENERATION_PARAMS:,} params)\n"
-    f"- TTS: `{HF_TTS_MODEL}` ({HF_TTS_PARAMS:,} params)\n"
-    f"- Total: **{HF_GENERATION_PARAMS + HF_TTS_PARAMS:,}** params"
+    f"- TTS: `{MODAL_TTS_MODEL}` (~{MODAL_TTS_PARAMS:,} params) via Modal\n"
+    f"- Total: **~{HF_GENERATION_PARAMS + MODAL_TTS_PARAMS:,}** params\n"
+    "- Current scope: **French-only audio in v1**"
 )
+
+
 def resolve_server_port() -> int | None:
     explicit = os.getenv("PORT") or os.getenv("GRADIO_SERVER_PORT")
     return int(explicit) if explicit else None
@@ -74,37 +77,41 @@ def resolve_server_port() -> int | None:
 
 def run_pack_builder(
     use_cases: str,
-    target_language: str,
     native_language: str,
     sentence_count: int,
     slow_audio: bool,
-    voice_name: str,
 ):
     load_environment()
     cleaned_use_cases = (use_cases or "").strip()
     if len(cleaned_use_cases) < 20:
         raise gr.Error("Describe your daily use cases in a bit more detail so the pack can be personalized.")
 
-    plan: GeneratedStudyPlan = generate_sentence_cards(
-        use_cases=cleaned_use_cases,
-        target_language=target_language,
-        native_language=native_language,
-        sentence_count=sentence_count,
-    )
-    bundle = create_study_pack(
-        cards=plan.cards,
-        target_language=target_language,
-        focus_verbs=plan.focus_verbs,
-        routine_steps=plan.routine_steps,
-        slow_audio=slow_audio,
-        voice_name=voice_name,
-    )
+    try:
+        plan: GeneratedStudyPlan = generate_sentence_cards(
+            use_cases=cleaned_use_cases,
+            target_language=TARGET_LANGUAGE,
+            native_language=native_language,
+            sentence_count=sentence_count,
+        )
+        bundle = create_study_pack(
+            cards=plan.cards,
+            target_language=TARGET_LANGUAGE,
+            focus_verbs=plan.focus_verbs,
+            routine_steps=plan.routine_steps,
+            slow_audio=slow_audio,
+        )
+    except ValueError as exc:
+        if str(exc) == FRENCH_ONLY_ERROR:
+            raise gr.Error(str(exc)) from exc
+        raise
+    except RuntimeError as exc:
+        raise gr.Error(str(exc)) from exc
 
     status_md = (
-        f"Built **{len(plan.cards)}** study sentences for **{target_language}** and generated "
+        f"Built **{len(plan.cards)}** study sentences for **{TARGET_LANGUAGE}** and generated "
         f"**{len(bundle.audio_paths)}** downloadable audio track(s) with up to "
         f"**{SENTENCES_PER_AUDIO_FILE}** sentences per file using "
-        f"`{HF_GENERATION_MODEL}` plus `{HF_TTS_MODEL}` with voice `{voice_name}`."
+        f"`{HF_GENERATION_MODEL}` plus **{bundle.tts_backend_label}**."
     )
     rationale_md = f"### Pack logic\n{plan.rationale}"
     assumptions_md = "### Working assumptions\n" + "\n".join(f"- {item}" for item in plan.assumptions)
@@ -147,16 +154,16 @@ def build_app() -> gr.Blocks:
                         label="Describe your general use cases",
                         lines=8,
                         value=default_prompt,
-                        placeholder="Explain the conversations and situations you expect in daily life.",
+                        placeholder="Explain the French conversations and situations you expect in daily life.",
                     )
                 with gr.Column(scale=2):
-                    target_language = gr.Dropdown(
-                        choices=get_supported_language_labels(),
-                        value="French",
+                    gr.Textbox(
+                        value=TARGET_LANGUAGE,
                         label="Target language",
+                        interactive=False,
                     )
                     native_language = gr.Dropdown(
-                        choices=["English", "French", "Spanish", "German", "Portuguese"],
+                        choices=get_native_language_choices(),
                         value="English",
                         label="Source language",
                     )
@@ -166,19 +173,13 @@ def build_app() -> gr.Blocks:
                         value=40,
                         step=1,
                         label="Sentence count",
-                        info=f"Audio is grouped into files of up to {SENTENCES_PER_AUDIO_FILE} sentences each.",
+                        info=f"Audio is grouped into WAV files of up to {SENTENCES_PER_AUDIO_FILE} sentences each.",
                     )
                     slow_audio = gr.Checkbox(
                         value=False,
-                        label="Use slower audio for easier shadowing",
+                        label="Use slower pacing for easier shadowing",
                     )
-                    voice_name = gr.Dropdown(
-                        choices=get_supported_tts_voices(),
-                        value=get_default_tts_voice("French"),
-                        label="TTS voice",
-                        info="Current HF Kokoro route exposes English voices only. Defaults are tuned per target language, but you can override them here.",
-                    )
-                    build_button = gr.Button("Build study pack", variant="primary")
+                    build_button = gr.Button("Build French study pack", variant="primary")
 
             with gr.Row():
                 status_output = gr.Markdown(label="Status", elem_id="status-output")
@@ -214,33 +215,23 @@ def build_app() -> gr.Blocks:
                 examples=[
                     [
                         "I need French for grocery shopping, greeting neighbors, going to the doctor, and asking simple travel questions.",
-                        "French",
                         "English",
                         20,
                         False,
-                        get_default_tts_voice("French"),
                     ],
                     [
-                        "I want Spanish for talking to parents at school pickup, ordering coffee, texting friends, and making weekend plans.",
-                        "Spanish",
+                        "I want French for talking to parents at school pickup, ordering coffee, texting friends, and making weekend plans.",
                         "English",
                         40,
                         False,
-                        get_default_tts_voice("Spanish"),
                     ],
                 ],
-                inputs=[use_cases, target_language, native_language, sentence_count, slow_audio, voice_name],
-            )
-
-            target_language.change(
-                fn=get_default_tts_voice,
-                inputs=[target_language],
-                outputs=[voice_name],
+                inputs=[use_cases, native_language, sentence_count, slow_audio],
             )
 
             build_button.click(
                 fn=run_pack_builder,
-                inputs=[use_cases, target_language, native_language, sentence_count, slow_audio, voice_name],
+                inputs=[use_cases, native_language, sentence_count, slow_audio],
                 outputs=[
                     status_output,
                     rationale_output,

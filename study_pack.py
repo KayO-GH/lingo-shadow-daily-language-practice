@@ -6,7 +6,12 @@ import csv
 import json
 import os
 import re
+import shutil
+import subprocess
+import sys
 import tempfile
+import urllib.error
+import urllib.request
 import zipfile
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -21,59 +26,21 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 DEFAULT_FALLBACK_ENV_PATH = Path("/Users/Kwadwo/Documents/PROJECTS/NITA-bill-review/.env")
 OUTPUT_ROOT = Path(tempfile.gettempdir()) / "daily_language_practice"
 SENTENCES_PER_AUDIO_FILE = 20
+TARGET_LANGUAGE = "French"
+NATIVE_LANGUAGE_CHOICES = ["English", "French", "Spanish", "German", "Portuguese"]
+
 HF_GENERATION_MODEL = "Qwen/Qwen2.5-7B-Instruct"
-HF_TTS_MODEL = "hexgrad/Kokoro-82M"
-HF_TTS_VOICE = "af_heart"
+MODAL_TTS_MODEL = "kyutai/tts-1.6b-en_fr"
+MODAL_TTS_VOICE_REPO = "kyutai/tts-voices"
+MODAL_TTS_VOICE = "voice-donations/Hugo_the_frenchie_enhanced.wav"
 HF_GENERATION_PARAMS = 7_615_616_512
-HF_TTS_PARAMS = 82_000_000
-HF_TTS_VOICES = [
-    "af_bella",
-    "af_heart",
-    "af_alloy",
-    "af_aoede",
-    "af_jessica",
-    "af_kore",
-    "af_nicole",
-    "af_nova",
-    "af_river",
-    "af_sarah",
-    "af_sky",
-    "am_adam",
-    "am_echo",
-    "am_eric",
-    "am_fenrir",
-    "am_liam",
-    "am_michael",
-    "am_onyx",
-    "am_puck",
-    "am_santa",
-]
-DEFAULT_TTS_VOICE_BY_LANGUAGE = {
-    "French": "af_bella",
-    "Spanish": "af_sarah",
-    "German": "am_michael",
-    "Italian": "af_jessica",
-    "Portuguese": "af_river",
-    "Dutch": "am_eric",
-    "Japanese": "af_sky",
-    "Korean": "af_nova",
-    "Arabic": "am_adam",
-    "Hindi": "af_alloy",
-    "Mandarin Chinese": "af_nicole",
-}
+MODAL_TTS_PARAMS = 1_800_000_000
+MODAL_TTS_TIMEOUT_SECONDS = 120.0
+FRENCH_ONLY_ERROR = "This v1 build currently supports French only."
+MACOS_FRENCH_VOICE_CANDIDATES = ("Amélie", "Thomas")
 
 SUPPORTED_LANGUAGES: dict[str, dict[str, str]] = {
-    "French": {"tts_code": "fr", "language_label": "French"},
-    "Spanish": {"tts_code": "es", "language_label": "Spanish"},
-    "German": {"tts_code": "de", "language_label": "German"},
-    "Italian": {"tts_code": "it", "language_label": "Italian"},
-    "Portuguese": {"tts_code": "pt", "language_label": "Portuguese"},
-    "Dutch": {"tts_code": "nl", "language_label": "Dutch"},
-    "Japanese": {"tts_code": "ja", "language_label": "Japanese"},
-    "Korean": {"tts_code": "ko", "language_label": "Korean"},
-    "Arabic": {"tts_code": "ar", "language_label": "Arabic"},
-    "Hindi": {"tts_code": "hi", "language_label": "Hindi"},
-    "Mandarin Chinese": {"tts_code": "zh-CN", "language_label": "Mandarin Chinese"},
+    TARGET_LANGUAGE: {"tts_code": "fr", "language_label": TARGET_LANGUAGE},
 }
 
 
@@ -110,31 +77,54 @@ class StudyPackBundle:
     audio_paths: list[Path]
     preview_audio_path: Path
     cards: list[SentenceCard]
+    tts_backend_label: str
+
+
+@dataclass(slots=True)
+class ModalTTSClient:
+    base_url: str
+    auth_token: str
+    timeout_seconds: float = MODAL_TTS_TIMEOUT_SECONDS
+    transport: Callable[[str, bytes, dict[str, str], float], bytes] | None = None
+
+    def synthesize_track(self, sentences: list[str], slow_audio: bool) -> bytes:
+        cleaned_sentences = [sentence.strip() for sentence in sentences if sentence.strip()]
+        if not cleaned_sentences:
+            raise ValueError("At least one non-empty sentence is required for TTS synthesis.")
+
+        if not self.base_url.strip():
+            raise RuntimeError("Missing MODAL_TTS_BASE_URL. Add it to .env or to the fallback env file.")
+
+        payload = json.dumps(
+            {"sentences": cleaned_sentences, "slow_audio": slow_audio}
+        ).encode("utf-8")
+        headers = {
+            "Accept": "audio/wav",
+            "Content-Type": "application/json",
+        }
+        if self.auth_token:
+            headers["Authorization"] = f"Bearer {self.auth_token}"
+
+        transport = self.transport or _default_modal_tts_transport
+        return transport(
+            self.base_url.rstrip("/") + "/synthesize-track",
+            payload,
+            headers,
+            self.timeout_seconds,
+        )
+
+
+def ensure_supported_target_language(language_name: str) -> None:
+    if language_name != TARGET_LANGUAGE:
+        raise ValueError(FRENCH_ONLY_ERROR)
 
 
 def get_model_stack_summary() -> str:
-    total_params = HF_GENERATION_PARAMS + HF_TTS_PARAMS
+    total_params = HF_GENERATION_PARAMS + MODAL_TTS_PARAMS
     return (
         f"{HF_GENERATION_MODEL} ({HF_GENERATION_PARAMS:,} params) + "
-        f"{HF_TTS_MODEL} ({HF_TTS_PARAMS:,} params) = {total_params:,} total params"
+        f"{MODAL_TTS_MODEL} (~{MODAL_TTS_PARAMS:,} params) = ~{total_params:,} total params"
     )
-
-
-def get_supported_tts_voices() -> list[str]:
-    return list(HF_TTS_VOICES)
-
-
-def get_default_tts_voice(language_name: str) -> str:
-    env_voice = os.getenv("HF_TTS_VOICE", "").strip()
-    if env_voice in HF_TTS_VOICES:
-        return env_voice
-    return DEFAULT_TTS_VOICE_BY_LANGUAGE.get(language_name, HF_TTS_VOICE)
-
-
-def resolve_tts_voice(language_name: str, voice_name: str | None) -> str:
-    if voice_name in HF_TTS_VOICES:
-        return voice_name
-    return get_default_tts_voice(language_name)
 
 
 def load_environment() -> Path | None:
@@ -154,14 +144,39 @@ def load_environment() -> Path | None:
 
 
 def get_supported_language_labels() -> list[str]:
-    return list(SUPPORTED_LANGUAGES.keys())
+    return [TARGET_LANGUAGE]
+
+
+def get_native_language_choices() -> list[str]:
+    return list(NATIVE_LANGUAGE_CHOICES)
 
 
 def get_tts_code(language_name: str) -> str:
-    language = SUPPORTED_LANGUAGES.get(language_name)
-    if not language:
-        raise ValueError(f"Unsupported target language: {language_name}")
-    return language["tts_code"]
+    ensure_supported_target_language(language_name)
+    return SUPPORTED_LANGUAGES[language_name]["tts_code"]
+
+
+def get_modal_tts_client(
+    transport: Callable[[str, bytes, dict[str, str], float], bytes] | None = None,
+) -> ModalTTSClient:
+    load_environment()
+    base_url = os.getenv("MODAL_TTS_BASE_URL", "").strip()
+    auth_token = os.getenv("MODAL_TTS_AUTH_TOKEN", "").strip()
+    timeout_raw = os.getenv("MODAL_TTS_TIMEOUT_SECONDS", "").strip()
+
+    timeout_seconds = MODAL_TTS_TIMEOUT_SECONDS
+    if timeout_raw:
+        try:
+            timeout_seconds = float(timeout_raw)
+        except ValueError as exc:
+            raise RuntimeError("MODAL_TTS_TIMEOUT_SECONDS must be a valid number.") from exc
+
+    return ModalTTSClient(
+        base_url=base_url,
+        auth_token=auth_token,
+        timeout_seconds=timeout_seconds,
+        transport=transport,
+    )
 
 
 def build_generation_prompt(
@@ -318,6 +333,85 @@ def _clean_text(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value)).strip()
 
 
+def _default_modal_tts_transport(url: str, payload: bytes, headers: dict[str, str], timeout: float) -> bytes:
+    request = urllib.request.Request(url=url, data=payload, headers=headers, method="POST")
+
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            body = response.read()
+            content_type = response.headers.get("Content-Type", "")
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace").strip()
+        message = detail or exc.reason or "unknown error"
+        raise RuntimeError(f"Modal TTS request failed with HTTP {exc.code}: {message}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Modal TTS request failed: {exc.reason}") from exc
+
+    if "audio/wav" not in content_type and "application/octet-stream" not in content_type:
+        raise RuntimeError(f"Modal TTS returned unexpected content type: {content_type or 'missing'}")
+
+    return body
+
+
+def _resolve_macos_french_voice() -> str | None:
+    if sys.platform != "darwin":
+        return None
+
+    say_binary = shutil.which("say")
+    afconvert_binary = shutil.which("afconvert")
+    if not say_binary or not afconvert_binary:
+        return None
+
+    try:
+        result = subprocess.run(
+            [say_binary, "-v", "?"],
+            capture_output=True,
+            check=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+    installed_voices = {line.split(maxsplit=1)[0] for line in result.stdout.splitlines() if line.strip()}
+    for voice in MACOS_FRENCH_VOICE_CANDIDATES:
+        if voice in installed_voices:
+            return voice
+    return None
+
+
+def _write_macos_fallback_wav(
+    sentences: list[str],
+    destination: Path,
+    slow_audio: bool,
+) -> str:
+    voice = _resolve_macos_french_voice()
+    if not voice:
+        raise RuntimeError("No macOS French voice is available for local fallback audio generation.")
+
+    say_binary = shutil.which("say")
+    afconvert_binary = shutil.which("afconvert")
+    if not say_binary or not afconvert_binary:
+        raise RuntimeError("macOS speech tools are unavailable for local fallback audio generation.")
+
+    spoken_text = "\n".join(sentence.strip() for sentence in sentences if sentence.strip())
+    if not spoken_text:
+        raise ValueError("At least one non-empty sentence is required for local fallback audio generation.")
+
+    rate = "150" if slow_audio else "180"
+    with tempfile.TemporaryDirectory(prefix="daily_language_practice_tts_") as temp_dir:
+        temp_aiff = Path(temp_dir) / "track.aiff"
+        subprocess.run(
+            [say_binary, "-v", voice, "-r", rate, "-o", str(temp_aiff), spoken_text],
+            check=True,
+        )
+        subprocess.run(
+            [afconvert_binary, "-f", "WAVE", "-d", "LEI16", str(temp_aiff), str(destination)],
+            check=True,
+        )
+
+    return f"macOS say ({voice})"
+
+
 def default_study_routine() -> list[StudyRoutineStep]:
     return [
         StudyRoutineStep(
@@ -436,6 +530,7 @@ def generate_sentence_cards(
     sentence_count: int,
     client: InferenceClient | None = None,
 ) -> GeneratedStudyPlan:
+    ensure_supported_target_language(target_language)
     load_environment()
     api_key = os.getenv("HF_TOKEN", "").strip()
     if not api_key and client is None:
@@ -514,26 +609,22 @@ def sanitize_filename(text: str) -> str:
 
 
 def default_tts_writer(
-    text: str,
-    lang_code: str,
+    sentences: list[str],
     destination: Path,
     slow_audio: bool,
-    voice_name: str,
-) -> None:
-    del lang_code
+    client: ModalTTSClient | None = None,
+) -> str:
+    tts_client = client or get_modal_tts_client()
+    try:
+        audio_bytes = tts_client.synthesize_track(sentences, slow_audio=slow_audio)
+    except RuntimeError:
+        fallback_voice = _resolve_macos_french_voice()
+        if not fallback_voice:
+            raise
+        return _write_macos_fallback_wav(sentences, destination, slow_audio)
 
-    api_key = os.getenv("HF_TOKEN", "").strip()
-    if not api_key:
-        raise RuntimeError("Missing HF_TOKEN. Add it to .env or to the fallback env file.")
-
-    voice = voice_name if voice_name in HF_TTS_VOICES else HF_TTS_VOICE
-    client = InferenceClient(api_key=api_key)
-    audio_bytes = client.text_to_speech(
-        text,
-        model=HF_TTS_MODEL,
-        extra_body={"voice": voice, "speed": 0.85 if slow_audio else 1.0},
-    )
     destination.write_bytes(audio_bytes)
+    return f"Modal ({MODAL_TTS_MODEL})"
 
 
 def chunk_cards(cards: list[SentenceCard], chunk_size: int = SENTENCES_PER_AUDIO_FILE) -> list[list[SentenceCard]]:
@@ -548,28 +639,30 @@ def create_study_pack(
     focus_verbs: list[str] | None = None,
     routine_steps: list[StudyRoutineStep] | None = None,
     slow_audio: bool = False,
-    voice_name: str | None = None,
     output_root: Path | None = None,
-    tts_writer: Callable[[str, str, Path, bool, str], None] | None = None,
+    tts_writer: Callable[[list[str], Path, bool], str | None] | None = None,
 ) -> StudyPackBundle:
     if not cards:
         raise ValueError("At least one sentence card is required.")
 
-    lang_code = get_tts_code(target_language)
+    ensure_supported_target_language(target_language)
+    get_tts_code(target_language)
     writer = tts_writer or default_tts_writer
-    resolved_voice = resolve_tts_voice(target_language, voice_name)
     base_dir = output_root or OUTPUT_ROOT
     session_dir = base_dir / f"{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:8]}"
     session_dir.mkdir(parents=True, exist_ok=True)
 
     audio_paths: list[Path] = []
+    tts_backend_label = f"Modal ({MODAL_TTS_MODEL})"
     for batch_index, card_batch in enumerate(chunk_cards(cards), start=1):
         start_number = ((batch_index - 1) * SENTENCES_PER_AUDIO_FILE) + 1
         end_number = start_number + len(card_batch) - 1
-        filename = f"{batch_index:02d}_sentences_{start_number:02d}_{end_number:02d}.mp3"
+        filename = f"{batch_index:02d}_sentences_{start_number:02d}_{end_number:02d}.wav"
         audio_path = session_dir / filename
-        track_text = "\n".join(card.target_sentence for card in card_batch)
-        writer(track_text, lang_code, audio_path, slow_audio, resolved_voice)
+        track_sentences = [card.target_sentence for card in card_batch]
+        backend_label = writer(track_sentences, audio_path, slow_audio)
+        if backend_label:
+            tts_backend_label = backend_label
         audio_paths.append(audio_path)
 
     csv_path = session_dir / "study_pack.csv"
@@ -603,7 +696,8 @@ def create_study_pack(
         f"Sentence count: {len(cards)}",
         f"Audio track count: {len(audio_paths)}",
         f"Sentences per audio file: up to {SENTENCES_PER_AUDIO_FILE}",
-        f"TTS voice: {resolved_voice}",
+        f"TTS service: {tts_backend_label}",
+        f"TTS voice profile: {MODAL_TTS_VOICE}",
         f"Model stack: {get_model_stack_summary()}",
         "",
         "Focus verbs:",
@@ -621,7 +715,7 @@ def create_study_pack(
     summary_lines.extend(
         [
             "",
-        "Sentences:",
+            "Sentences:",
         ]
     )
     summary_lines.extend(
@@ -658,6 +752,7 @@ def create_study_pack(
         audio_paths=audio_paths,
         preview_audio_path=audio_paths[0],
         cards=cards,
+        tts_backend_label=tts_backend_label,
     )
 
 
