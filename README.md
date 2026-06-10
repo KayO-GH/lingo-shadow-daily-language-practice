@@ -1,8 +1,8 @@
 ---
 title: LingoShadow - Daily Language Practice
 emoji: "🎧"
-colorFrom: emerald
-colorTo: amber
+colorFrom: green
+colorTo: yellow
 sdk: gradio
 sdk_version: 6.17.3
 app_file: app.py
