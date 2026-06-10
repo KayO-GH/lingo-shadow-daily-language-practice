@@ -15,8 +15,10 @@ from study_pack import (
     SENTENCES_PER_AUDIO_FILE,
     build_results_rows,
     create_study_pack,
+    get_default_tts_voice,
     generate_sentence_cards,
     get_supported_language_labels,
+    get_supported_tts_voices,
     load_environment,
 )
 
@@ -76,6 +78,7 @@ def run_pack_builder(
     native_language: str,
     sentence_count: int,
     slow_audio: bool,
+    voice_name: str,
 ):
     load_environment()
     cleaned_use_cases = (use_cases or "").strip()
@@ -94,13 +97,14 @@ def run_pack_builder(
         focus_verbs=plan.focus_verbs,
         routine_steps=plan.routine_steps,
         slow_audio=slow_audio,
+        voice_name=voice_name,
     )
 
     status_md = (
         f"Built **{len(plan.cards)}** study sentences for **{target_language}** and generated "
         f"**{len(bundle.audio_paths)}** downloadable audio track(s) with up to "
         f"**{SENTENCES_PER_AUDIO_FILE}** sentences per file using "
-        f"`{HF_GENERATION_MODEL}` plus `{HF_TTS_MODEL}`."
+        f"`{HF_GENERATION_MODEL}` plus `{HF_TTS_MODEL}` with voice `{voice_name}`."
     )
     rationale_md = f"### Pack logic\n{plan.rationale}"
     assumptions_md = "### Working assumptions\n" + "\n".join(f"- {item}" for item in plan.assumptions)
@@ -168,6 +172,12 @@ def build_app() -> gr.Blocks:
                         value=False,
                         label="Use slower audio for easier shadowing",
                     )
+                    voice_name = gr.Dropdown(
+                        choices=get_supported_tts_voices(),
+                        value=get_default_tts_voice("French"),
+                        label="TTS voice",
+                        info="Current HF Kokoro route exposes English voices only. Defaults are tuned per target language, but you can override them here.",
+                    )
                     build_button = gr.Button("Build study pack", variant="primary")
 
             with gr.Row():
@@ -208,6 +218,7 @@ def build_app() -> gr.Blocks:
                         "English",
                         20,
                         False,
+                        get_default_tts_voice("French"),
                     ],
                     [
                         "I want Spanish for talking to parents at school pickup, ordering coffee, texting friends, and making weekend plans.",
@@ -215,14 +226,21 @@ def build_app() -> gr.Blocks:
                         "English",
                         40,
                         False,
+                        get_default_tts_voice("Spanish"),
                     ],
                 ],
-                inputs=[use_cases, target_language, native_language, sentence_count, slow_audio],
+                inputs=[use_cases, target_language, native_language, sentence_count, slow_audio, voice_name],
+            )
+
+            target_language.change(
+                fn=get_default_tts_voice,
+                inputs=[target_language],
+                outputs=[voice_name],
             )
 
             build_button.click(
                 fn=run_pack_builder,
-                inputs=[use_cases, target_language, native_language, sentence_count, slow_audio],
+                inputs=[use_cases, target_language, native_language, sentence_count, slow_audio, voice_name],
                 outputs=[
                     status_output,
                     rationale_output,

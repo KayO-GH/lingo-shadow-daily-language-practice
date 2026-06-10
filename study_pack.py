@@ -26,6 +26,41 @@ HF_TTS_MODEL = "hexgrad/Kokoro-82M"
 HF_TTS_VOICE = "af_heart"
 HF_GENERATION_PARAMS = 7_615_616_512
 HF_TTS_PARAMS = 82_000_000
+HF_TTS_VOICES = [
+    "af_bella",
+    "af_heart",
+    "af_alloy",
+    "af_aoede",
+    "af_jessica",
+    "af_kore",
+    "af_nicole",
+    "af_nova",
+    "af_river",
+    "af_sarah",
+    "af_sky",
+    "am_adam",
+    "am_echo",
+    "am_eric",
+    "am_fenrir",
+    "am_liam",
+    "am_michael",
+    "am_onyx",
+    "am_puck",
+    "am_santa",
+]
+DEFAULT_TTS_VOICE_BY_LANGUAGE = {
+    "French": "af_bella",
+    "Spanish": "af_sarah",
+    "German": "am_michael",
+    "Italian": "af_jessica",
+    "Portuguese": "af_river",
+    "Dutch": "am_eric",
+    "Japanese": "af_sky",
+    "Korean": "af_nova",
+    "Arabic": "am_adam",
+    "Hindi": "af_alloy",
+    "Mandarin Chinese": "af_nicole",
+}
 
 SUPPORTED_LANGUAGES: dict[str, dict[str, str]] = {
     "French": {"tts_code": "fr", "language_label": "French"},
@@ -83,6 +118,23 @@ def get_model_stack_summary() -> str:
         f"{HF_GENERATION_MODEL} ({HF_GENERATION_PARAMS:,} params) + "
         f"{HF_TTS_MODEL} ({HF_TTS_PARAMS:,} params) = {total_params:,} total params"
     )
+
+
+def get_supported_tts_voices() -> list[str]:
+    return list(HF_TTS_VOICES)
+
+
+def get_default_tts_voice(language_name: str) -> str:
+    env_voice = os.getenv("HF_TTS_VOICE", "").strip()
+    if env_voice in HF_TTS_VOICES:
+        return env_voice
+    return DEFAULT_TTS_VOICE_BY_LANGUAGE.get(language_name, HF_TTS_VOICE)
+
+
+def resolve_tts_voice(language_name: str, voice_name: str | None) -> str:
+    if voice_name in HF_TTS_VOICES:
+        return voice_name
+    return get_default_tts_voice(language_name)
 
 
 def load_environment() -> Path | None:
@@ -461,14 +513,20 @@ def sanitize_filename(text: str) -> str:
     return compact[:36] or "sentence"
 
 
-def default_tts_writer(text: str, lang_code: str, destination: Path, slow_audio: bool) -> None:
+def default_tts_writer(
+    text: str,
+    lang_code: str,
+    destination: Path,
+    slow_audio: bool,
+    voice_name: str,
+) -> None:
     del lang_code
 
     api_key = os.getenv("HF_TOKEN", "").strip()
     if not api_key:
         raise RuntimeError("Missing HF_TOKEN. Add it to .env or to the fallback env file.")
 
-    voice = os.getenv("HF_TTS_VOICE", HF_TTS_VOICE).strip() or HF_TTS_VOICE
+    voice = voice_name if voice_name in HF_TTS_VOICES else HF_TTS_VOICE
     client = InferenceClient(api_key=api_key)
     audio_bytes = client.text_to_speech(
         text,
@@ -490,14 +548,16 @@ def create_study_pack(
     focus_verbs: list[str] | None = None,
     routine_steps: list[StudyRoutineStep] | None = None,
     slow_audio: bool = False,
+    voice_name: str | None = None,
     output_root: Path | None = None,
-    tts_writer: Callable[[str, str, Path, bool], None] | None = None,
+    tts_writer: Callable[[str, str, Path, bool, str], None] | None = None,
 ) -> StudyPackBundle:
     if not cards:
         raise ValueError("At least one sentence card is required.")
 
     lang_code = get_tts_code(target_language)
     writer = tts_writer or default_tts_writer
+    resolved_voice = resolve_tts_voice(target_language, voice_name)
     base_dir = output_root or OUTPUT_ROOT
     session_dir = base_dir / f"{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:8]}"
     session_dir.mkdir(parents=True, exist_ok=True)
@@ -509,7 +569,7 @@ def create_study_pack(
         filename = f"{batch_index:02d}_sentences_{start_number:02d}_{end_number:02d}.mp3"
         audio_path = session_dir / filename
         track_text = "\n".join(card.target_sentence for card in card_batch)
-        writer(track_text, lang_code, audio_path, slow_audio)
+        writer(track_text, lang_code, audio_path, slow_audio, resolved_voice)
         audio_paths.append(audio_path)
 
     csv_path = session_dir / "study_pack.csv"
@@ -543,6 +603,7 @@ def create_study_pack(
         f"Sentence count: {len(cards)}",
         f"Audio track count: {len(audio_paths)}",
         f"Sentences per audio file: up to {SENTENCES_PER_AUDIO_FILE}",
+        f"TTS voice: {resolved_voice}",
         f"Model stack: {get_model_stack_summary()}",
         "",
         "Focus verbs:",

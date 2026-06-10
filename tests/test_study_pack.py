@@ -10,8 +10,10 @@ from study_pack import (
     StudyRoutineStep,
     create_study_pack,
     extract_json_payload,
+    get_default_tts_voice,
     generate_sentence_cards,
     get_model_stack_summary,
+    resolve_tts_voice,
     normalize_plan,
 )
 
@@ -112,9 +114,15 @@ def test_create_study_pack_writes_bundle_and_zip(tmp_path: Path) -> None:
 
     calls: list[tuple[str, str, bool]] = []
 
-    def fake_tts_writer(text: str, lang_code: str, destination: Path, slow_audio: bool) -> None:
-        calls.append((text, lang_code, slow_audio))
-        destination.write_bytes(f"{lang_code}|{slow_audio}|{text}".encode("utf-8"))
+    def fake_tts_writer(
+        text: str,
+        lang_code: str,
+        destination: Path,
+        slow_audio: bool,
+        voice_name: str,
+    ) -> None:
+        calls.append((text, lang_code, slow_audio, voice_name))
+        destination.write_bytes(f"{lang_code}|{slow_audio}|{voice_name}|{text}".encode("utf-8"))
 
     bundle = create_study_pack(
         cards=cards,
@@ -136,7 +144,7 @@ def test_create_study_pack_writes_bundle_and_zip(tmp_path: Path) -> None:
     assert (bundle.session_dir / "study_pack.json").exists()
     assert (bundle.session_dir / "daily_routine.md").exists()
     assert (bundle.session_dir / "focus_verbs.txt").exists()
-    assert calls == [("J'ai besoin de pommes.\nCe bus va ou ?", "fr", False)]
+    assert calls == [("J'ai besoin de pommes.\nCe bus va ou ?", "fr", False, "af_bella")]
 
     payload = json.loads((bundle.session_dir / "study_pack.json").read_text(encoding="utf-8"))
     assert payload[0]["target_sentence"] == "J'ai besoin de pommes."
@@ -157,7 +165,13 @@ def test_create_study_pack_batches_every_twenty_sentences(tmp_path: Path) -> Non
 
     calls: list[str] = []
 
-    def fake_tts_writer(text: str, lang_code: str, destination: Path, slow_audio: bool) -> None:
+    def fake_tts_writer(
+        text: str,
+        lang_code: str,
+        destination: Path,
+        slow_audio: bool,
+        voice_name: str,
+    ) -> None:
         calls.append(text)
         destination.write_bytes(text.encode("utf-8"))
 
@@ -179,6 +193,13 @@ def test_model_stack_summary_mentions_both_models() -> None:
     summary = get_model_stack_summary()
     assert "Qwen/Qwen2.5-7B-Instruct" in summary
     assert "hexgrad/Kokoro-82M" in summary
+
+
+def test_language_defaults_resolve_to_expected_voices() -> None:
+    assert get_default_tts_voice("French") == "af_bella"
+    assert get_default_tts_voice("German") == "am_michael"
+    assert resolve_tts_voice("French", "") == "af_bella"
+    assert resolve_tts_voice("French", "af_sarah") == "af_sarah"
 
 
 def test_generate_sentence_cards_retries_until_requested_count() -> None:
