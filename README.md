@@ -1,3 +1,15 @@
+---
+title: LingoShadow - Daily Language Practice
+emoji: "🎧"
+colorFrom: emerald
+colorTo: amber
+sdk: gradio
+sdk_version: 6.17.3
+app_file: app.py
+python_version: "3.12"
+pinned: false
+---
+
 # LingoShadow - Daily Language Practice
 
 `LingoShadow - Daily Language Practice` is a standalone Gradio project for building a personalized self-study pack from real daily-life situations. The current v1 is intentionally scoped to **French-only audio** so the speech quality can be materially better than the earlier English-voice workaround.
