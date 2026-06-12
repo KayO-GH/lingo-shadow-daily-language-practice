@@ -300,6 +300,45 @@ body {
     box-shadow: 0 18px 36px rgba(15, 23, 42, 0.05);
     padding: 0.2rem;
 }
+#builder-row,
+#results-shell {
+    gap: 1rem;
+}
+#prompt-workspace,
+#setup-stack,
+#results-tabs-shell {
+    border-radius: 22px;
+    border: 1px solid rgba(148, 163, 184, 0.16);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(248, 250, 252, 0.96) 100%);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+    padding: 0.9rem;
+}
+#prompt-workspace {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(255, 251, 235, 0.94) 100%);
+}
+#setup-stack {
+    background: linear-gradient(180deg, rgba(255, 250, 245, 0.98) 0%, rgba(240, 249, 255, 0.96) 100%);
+}
+.builder-panel,
+.builder-panel > .gr-block,
+.builder-panel .gr-block,
+.control-panel,
+.control-panel > .gr-block,
+.control-panel .gr-block {
+    background: rgba(255, 255, 255, 0.92) !important;
+}
+.builder-panel .gr-form,
+.builder-panel .gr-group,
+.control-panel .gr-form,
+.control-panel .gr-group {
+    background: rgba(255, 255, 255, 0.9) !important;
+    border-color: rgba(148, 163, 184, 0.16) !important;
+}
+#prompt-workspace .gr-block,
+#setup-stack .gr-block,
+#results-tabs-shell .gr-block {
+    background: transparent !important;
+}
 .panel-heading {
     margin: 0.2rem 0 0.8rem 0;
 }
@@ -326,14 +365,134 @@ body {
     color: #9a3412 !important;
     margin-bottom: 0.18rem;
 }
+.builder-panel .prose p,
+.builder-panel .prose li,
+.control-panel .prose p,
+.control-panel .prose li,
+.builder-panel .panel-heading p,
+.control-panel .panel-heading p,
+.builder-panel .wrap,
+.control-panel .wrap,
+.builder-panel label,
+.control-panel label {
+    color: #334155 !important;
+}
+.builder-panel textarea,
+.builder-panel input,
+.builder-panel select,
+.control-panel textarea,
+.control-panel input,
+.control-panel select,
+.builder-panel .scroll-hide,
+.control-panel .scroll-hide,
+.builder-panel .wrap-inner,
+.control-panel .wrap-inner {
+    background: #f8fafc !important;
+    color: #0f172a !important;
+    border-color: rgba(148, 163, 184, 0.28) !important;
+}
+.builder-panel textarea::placeholder,
+.builder-panel input::placeholder,
+.control-panel textarea::placeholder,
+.control-panel input::placeholder {
+    color: #64748b !important;
+}
+.builder-panel textarea,
+.control-panel textarea {
+    line-height: 1.45;
+}
+#use-cases-input textarea,
+#use-cases-input .scroll-hide {
+    min-height: 220px !important;
+}
+#use-cases-input label,
+#use-cases-input .wrap {
+    color: #1e293b !important;
+    font-weight: 700;
+}
+.builder-panel .gradio-textbox,
+.builder-panel .gradio-dropdown,
+.builder-panel .gradio-slider,
+.control-panel .gradio-textbox,
+.control-panel .gradio-dropdown,
+.control-panel .gradio-slider {
+    background: transparent !important;
+}
+.builder-panel .gradio-dropdown svg,
+.control-panel .gradio-dropdown svg,
+.control-panel .gradio-slider svg {
+    color: #334155 !important;
+    stroke: #334155 !important;
+}
+.control-panel .gradio-button,
+.control-panel button {
+    box-shadow: 0 10px 24px rgba(249, 115, 22, 0.2);
+}
+.builder-panel label span,
+.control-panel label span,
+.gradio-dropdown label span,
+.gradio-dropdown label *,
+#audio-shell label,
+#audio-shell label span,
+#audio-shell label *,
+#downloads-shell label,
+#downloads-shell label span,
+#downloads-shell label *,
+#preview-audio label span {
+    color: #fffdf9 !important;
+}
 .examples-note {
     margin-top: 0.45rem;
     color: #64748b;
     font-size: 0.9rem;
 }
 #results-shell .gradio-row,
-#results-shell .gradio-column {
-    gap: 0.9rem;
+#results-shell .gradio-column,
+#results-tabs-shell .gradio-row,
+#results-tabs-shell .gradio-column {
+    gap: 0.85rem;
+}
+#results-tabs-shell [role="tablist"] {
+    gap: 0.55rem;
+    margin-bottom: 0.8rem;
+}
+#results-tabs-shell button[role="tab"] {
+    border-radius: 999px !important;
+    border: 1px solid rgba(148, 163, 184, 0.2) !important;
+    background: rgba(255, 255, 255, 0.92) !important;
+    color: #334155 !important;
+    font-weight: 700 !important;
+}
+#results-tabs-shell button[role="tab"][aria-selected="true"] {
+    background: linear-gradient(135deg, #fff7ed 0%, #e0f2fe 100%) !important;
+    color: #9a3412 !important;
+    border-color: rgba(249, 115, 22, 0.24) !important;
+}
+#results-shell .tabitem,
+#results-tabs-shell .tabitem {
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.76);
+}
+#results-summary {
+    margin-bottom: 0.1rem;
+}
+#results-summary strong {
+    display: block;
+    color: #0f172a;
+    font-size: 1.08rem;
+}
+#results-summary p {
+    margin: 0.2rem 0 0 0;
+    color: #475569;
+}
+#status-output,
+#assumptions-output,
+#focus-verbs-output,
+#routine-output,
+#table-shell,
+#audio-shell,
+#downloads-shell {
+    min-height: 0 !important;
 }
 #status-output, #assumptions-output {
     min-height: 3rem;
@@ -349,6 +508,24 @@ body {
 #results-shell .gradio-file,
 #results-shell .gradio-audio {
     border-radius: 18px;
+}
+#audio-shell label,
+#audio-shell label span,
+#audio-shell label *,
+#downloads-shell label,
+#downloads-shell label span,
+#downloads-shell label *,
+#audio-shell .file-preview-header,
+#downloads-shell .file-preview-header {
+    color: #fffdf9 !important;
+}
+#audio-shell,
+#downloads-shell,
+#table-shell {
+    border: 1px solid rgba(148, 163, 184, 0.14);
+    border-radius: 22px;
+    background: rgba(255, 255, 255, 0.92);
+    padding: 0.2rem;
 }
 #preview-audio label span svg.feather-music,
 #preview-audio .empty .icon svg.feather-music {
@@ -391,6 +568,10 @@ body {
     .highlights-grid,
     .passport-stack {
         grid-template-columns: 1fr;
+    }
+    #use-cases-input textarea,
+    #use-cases-input .scroll-hide {
+        min-height: 180px !important;
     }
 }
 """
@@ -457,8 +638,8 @@ def build_highlights_html() -> str:
     <div class="highlights-grid">
         <div class="highlight-card">
             <span>🌍</span>
-            <strong>{len(FLAG_BADGES)} study destinations</strong>
-            <p>Supported target languages stay visible up front so the app immediately reads as language practice.</p>
+            <strong>{len(FLAG_BADGES)} languages and counting</strong>
+            <p>Adding new languages as fast as the models can make them available.</p>
         </div>
         <div class="highlight-card">
             <span>🧠</span>
@@ -470,15 +651,6 @@ def build_highlights_html() -> str:
             <strong>Listen, shadow, repeat</strong>
             <p>Audio previews, bundled tracks, and focus verbs make the pack feel ready for real daily repetition.</p>
         </div>
-    </div>
-    """.strip()
-
-
-def build_control_tip_html() -> str:
-    return """
-    <div class="control-tip">
-        <strong>Cheerful builder</strong>
-        Add situations you actually live through. The more concrete the prompt, the more useful the sentence pack and audio drills become.
     </div>
     """.strip()
 
@@ -617,23 +789,25 @@ def build_app() -> gr.Blocks:
 
             gr.HTML(build_highlights_html(), elem_id="practice-highlights")
 
-            with gr.Row(equal_height=True):
+            with gr.Row(elem_id="builder-row"):
                 with gr.Column(scale=5, elem_classes="builder-panel"):
                     gr.HTML(
                         build_panel_heading_html(
                             "Describe your world",
-                            "Feed the app the conversations you actually expect, then let it generate a study pack around them.",
+                            "Feed the app the conversations you actually expect, then let it generate a study pack around them. Add situations you actually live through. The more concrete the prompt, the more useful the sentence pack and audio drills become.",
                         )
                     )
-                    use_cases = gr.Textbox(
-                        label="Describe your general use cases",
-                        lines=8,
-                        value=default_prompt,
-                        placeholder="Explain the conversations and situations you expect in daily life.",
-                    )
-                    gr.Markdown(
-                        "Bring in scenes like commuting, shopping, school pickup, appointments, travel, home life, or work."
-                    )
+                    with gr.Column(elem_id="prompt-workspace"):
+                        use_cases = gr.Textbox(
+                            label="Describe your general use cases",
+                            lines=6,
+                            value=default_prompt,
+                            placeholder="Explain the conversations and situations you expect in daily life.",
+                            elem_id="use-cases-input",
+                        )
+                        gr.Markdown(
+                            "Bring in scenes like commuting, shopping, school pickup, appointments, travel, home life, or work."
+                        )
 
                 with gr.Column(scale=3, elem_classes="control-panel"):
                     gr.HTML(
@@ -642,137 +816,142 @@ def build_app() -> gr.Blocks:
                             "Mix a target language, source language, and sentence count for a pack sized to your day.",
                         )
                     )
-                    gr.HTML(build_control_tip_html())
-                    target_language = gr.Dropdown(
-                        choices=get_supported_language_labels(),
-                        value=TARGET_LANGUAGE,
-                        label="Target language",
-                        info="Select the language you want to practice hearing and speaking.",
-                    )
-                    native_language = gr.Dropdown(
-                        choices=get_native_language_choices(),
-                        value="English",
-                        label="Source language",
-                        info="Translations and explanations are grounded in this language.",
-                    )
-                    sentence_count = gr.Slider(
-                        minimum=20,
-                        maximum=100,
-                        value=20,
-                        step=1,
-                        label="Sentence count",
-                        info=f"Audio is grouped into WAV files of up to {SENTENCES_PER_AUDIO_FILE} sentences each.",
-                    )
-                    build_button = gr.Button("Build study pack", variant="primary")
-                    gr.Markdown(
-                        '<div class="examples-note">Try a routine-focused prompt first, then widen the sentence count once the tone feels right.</div>'
-                    )
+                    with gr.Column(elem_id="setup-stack"):
+                        target_language = gr.Dropdown(
+                            choices=get_supported_language_labels(),
+                            value=TARGET_LANGUAGE,
+                            label="Target language",
+                            info="Select the language you want to practice hearing and speaking.",
+                        )
+                        native_language = gr.Dropdown(
+                            choices=get_native_language_choices(),
+                            value="English",
+                            label="Source language",
+                            info="Translations and explanations are grounded in this language.",
+                        )
+                        sentence_count = gr.Slider(
+                            minimum=20,
+                            maximum=100,
+                            value=20,
+                            step=1,
+                            label="Sentence count",
+                            info=f"Audio is grouped into WAV files of up to {SENTENCES_PER_AUDIO_FILE} sentences each.",
+                        )
+                        build_button = gr.Button("Build study pack", variant="primary")
+                        gr.Markdown(
+                            '<div class="examples-note">Try a routine-focused prompt first, then widen the sentence count once the tone feels right.</div>'
+                        )
 
             with gr.Column(elem_id="results-shell"):
-                with gr.Row(equal_height=True):
-                    with gr.Column(scale=2, elem_classes="status-panel"):
-                        gr.HTML(
-                            build_panel_heading_html(
-                                "Build status",
-                                "See whether the current pack completed and what assets were generated.",
-                            )
-                        )
-                        status_output = gr.Markdown(label="Status", elem_id="status-output")
-                    with gr.Column(scale=1, elem_classes="status-panel"):
-                        gr.HTML(
-                            build_panel_heading_html(
-                                "Focus verbs",
-                                "Quick anchors for repetition before you review the full table.",
-                            )
-                        )
-                        focus_verbs_output = gr.Markdown(label="Focus verbs", elem_id="focus-verbs-output")
-
-                with gr.Row(equal_height=True):
-                    with gr.Column(scale=2, elem_classes="results-panel"):
-                        gr.HTML(
-                            build_panel_heading_html(
-                                "Practice routine",
-                                "A compact 45-minute loop you can run daily with the generated material.",
-                            )
-                        )
-                        routine_output = gr.Markdown(label="Study routine", elem_id="routine-output")
-                    with gr.Column(scale=1, elem_classes="results-panel"):
-                        gr.HTML(
-                            build_panel_heading_html(
-                                "Notes and assumptions",
-                                "Review what the planner inferred from your prompt before re-running with edits.",
-                            )
-                        )
-                        assumptions_output = gr.Markdown(label="Assumptions", elem_id="assumptions-output")
-
-                with gr.Column(elem_classes="results-panel"):
-                    gr.HTML(
-                        build_panel_heading_html(
-                            "Generated sentence pack",
-                            "Scan the scenarios, compare source and target phrasing, and isolate the verbs worth drilling.",
-                        )
-                    )
-                    table_output = gr.Dataframe(
-                        headers=[
-                            "Scenario",
-                            "Source sentence",
-                            "Target sentence",
-                            "Verb",
-                        ],
-                        datatype=["str", "str", "str", "str"],
-                        row_count=12,
-                        column_count=4,
-                        interactive=False,
-                        wrap=False,
-                        label="Generated sentence pack",
-                    )
-
-                with gr.Row(equal_height=True):
-                    with gr.Column(scale=2, elem_classes="results-panel"):
-                        gr.HTML(
-                            build_panel_heading_html(
-                                "Preview audio",
-                                "Listen to the first generated track before downloading the full bundle.",
-                            )
-                        )
-                        preview_audio = gr.Audio(
-                            label="Preview the first generated audio track",
-                            elem_id="preview-audio",
-                        )
-                    with gr.Column(scale=1, elem_classes="results-panel"):
-                        gr.HTML(
-                            build_panel_heading_html(
-                                "Downloads",
-                                "Grab the ZIP bundle or use the individual WAV files directly.",
-                            )
-                        )
-                        zip_output = gr.File(label="Download the full study pack ZIP")
-                        audio_files = gr.File(label="Generated audio tracks", file_count="multiple")
-
-            with gr.Column(elem_classes="builder-panel"):
-                gr.HTML(
-                    build_panel_heading_html(
-                        "Example prompts",
-                        "Use one of these cheerful everyday scenarios to seed your first pack quickly.",
-                    )
+                gr.Markdown(
+                    """
+                    <div id="results-summary">
+                        <strong>Study pack workspace</strong>
+                        <p>Generate once, then switch between overview, sentence review, and audio downloads without dragging through empty panels.</p>
+                    </div>
+                    """.strip()
                 )
-                gr.Examples(
-                    examples=[
-                        [
-                            "I need French for grocery shopping, greeting neighbors, going to the doctor, and asking simple travel questions.",
-                            "French",
-                            "English",
-                            20,
-                        ],
-                        [
-                            "I want French for talking to parents at school pickup, ordering coffee, texting friends, and making weekend plans.",
-                            "French",
-                            "English",
-                            20,
-                        ],
-                    ],
-                    inputs=[use_cases, target_language, native_language, sentence_count],
-                )
+                with gr.Column(elem_id="results-tabs-shell"):
+                    with gr.Tabs():
+                        with gr.Tab("Overview"):
+                            with gr.Row():
+                                with gr.Column(scale=2, elem_classes="status-panel"):
+                                    gr.HTML(
+                                        build_panel_heading_html(
+                                            "Build status",
+                                            "See whether the current pack completed and what assets were generated.",
+                                        )
+                                    )
+                                    status_output = gr.Markdown(
+                                        "Build a pack to see generation status, file counts, and stack details.",
+                                        label="Status",
+                                        elem_id="status-output",
+                                    )
+                                with gr.Column(scale=1, elem_classes="status-panel"):
+                                    gr.HTML(
+                                        build_panel_heading_html(
+                                            "Focus verbs",
+                                            "Quick anchors for repetition before you review the full table.",
+                                        )
+                                    )
+                                    focus_verbs_output = gr.Markdown(
+                                        "Focus verbs will appear here after generation.",
+                                        label="Focus verbs",
+                                        elem_id="focus-verbs-output",
+                                    )
+
+                            with gr.Row():
+                                with gr.Column(scale=2, elem_classes="results-panel"):
+                                    gr.HTML(
+                                        build_panel_heading_html(
+                                            "Practice routine",
+                                            "A compact 45-minute loop you can run daily with the generated material.",
+                                        )
+                                    )
+                                    routine_output = gr.Markdown(
+                                        "Your generated routine will land here once the pack is ready.",
+                                        label="Study routine",
+                                        elem_id="routine-output",
+                                    )
+                                with gr.Column(scale=1, elem_classes="results-panel"):
+                                    gr.HTML(
+                                        build_panel_heading_html(
+                                            "Notes and assumptions",
+                                            "Review what the planner inferred from your prompt before re-running with edits.",
+                                        )
+                                    )
+                                    assumptions_output = gr.Markdown(
+                                        "Assumptions and pack logic will appear here.",
+                                        label="Assumptions",
+                                        elem_id="assumptions-output",
+                                    )
+
+                        with gr.Tab("Sentence pack"):
+                            with gr.Column(elem_id="table-shell"):
+                                gr.HTML(
+                                    build_panel_heading_html(
+                                        "Generated sentence pack",
+                                        "Scan the scenarios, compare source and target phrasing, and isolate the verbs worth drilling.",
+                                    )
+                                )
+                                table_output = gr.Dataframe(
+                                    headers=[
+                                        "Scenario",
+                                        "Source sentence",
+                                        "Target sentence",
+                                        "Verb",
+                                    ],
+                                    datatype=["str", "str", "str", "str"],
+                                    row_count=8,
+                                    column_count=4,
+                                    interactive=False,
+                                    wrap=False,
+                                    label="Generated sentence pack",
+                                )
+
+                        with gr.Tab("Audio kit"):
+                            with gr.Row():
+                                with gr.Column(scale=2, elem_id="audio-shell"):
+                                    gr.HTML(
+                                        build_panel_heading_html(
+                                            "Preview audio",
+                                            "Listen to the first generated track before downloading the full bundle.",
+                                        )
+                                    )
+                                    preview_audio = gr.Audio(
+                                        label="Preview the first generated audio track",
+                                        elem_id="preview-audio",
+                                    )
+                                with gr.Column(scale=1, elem_id="downloads-shell"):
+                                    gr.HTML(
+                                        build_panel_heading_html(
+                                            "Downloads",
+                                            "Grab the ZIP bundle or use the individual WAV files directly.",
+                                        )
+                                    )
+                                    zip_output = gr.File(label="Download the full study pack ZIP")
+                                    audio_files = gr.File(label="Generated audio tracks", file_count="multiple")
+
 
             target_language.change(
                 fn=build_model_stack_md,
