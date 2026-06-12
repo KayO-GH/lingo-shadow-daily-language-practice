@@ -33,35 +33,311 @@ Describe the situations you actually live in and the app will build high-frequen
 """.strip()
 
 APP_THEME = gr.themes.Soft(
-    primary_hue="emerald",
-    secondary_hue="amber",
-    neutral_hue="stone",
+    primary_hue="orange",
+    secondary_hue="sky",
+    neutral_hue="slate",
 ).set(
-    body_background_fill="linear-gradient(180deg, #f6efe5 0%, #eef6ef 100%)",
-    block_background_fill="rgba(255, 252, 247, 0.92)",
-    block_border_color="#dbcbb7",
-    button_primary_background_fill="linear-gradient(135deg, #0f766e 0%, #15803d 100%)",
-    button_primary_background_fill_hover="linear-gradient(135deg, #115e59 0%, #166534 100%)",
+    body_background_fill="linear-gradient(180deg, #fff8ef 0%, #effcfb 48%, #eef4ff 100%)",
+    block_background_fill="rgba(255, 255, 255, 0.92)",
+    block_border_color="rgba(249, 115, 22, 0.18)",
+    button_primary_background_fill="linear-gradient(135deg, #f97316 0%, #f43f5e 100%)",
+    button_primary_background_fill_hover="linear-gradient(135deg, #ea580c 0%, #e11d48 100%)",
+    button_primary_text_color="#fffdf9",
+    input_background_fill="#ffffff",
+    input_border_color="rgba(14, 165, 233, 0.22)",
 )
 
 APP_CSS = """
+body {
+    background:
+        radial-gradient(circle at top left, rgba(253, 186, 116, 0.28), transparent 25%),
+        radial-gradient(circle at top right, rgba(56, 189, 248, 0.18), transparent 28%),
+        linear-gradient(180deg, #fff8ef 0%, #effcfb 46%, #eef4ff 100%);
+}
+.gradio-container,
+.gradio-container-6-17-3 {
+    background:
+        radial-gradient(circle at top left, rgba(253, 186, 116, 0.28), transparent 25%),
+        radial-gradient(circle at top right, rgba(56, 189, 248, 0.18), transparent 28%),
+        linear-gradient(180deg, #fff8ef 0%, #effcfb 46%, #eef4ff 100%) !important;
+    color: #0f172a !important;
+}
 #app-shell {
     max-width: 1180px;
     margin: 0 auto;
+    padding: 1rem 0 2rem 0;
 }
-#hero {
-    background: linear-gradient(135deg, rgba(15, 118, 110, 0.10) 0%, rgba(217, 119, 6, 0.10) 100%);
-    border: 1px solid rgba(120, 113, 108, 0.16);
-    border-radius: 20px;
-    padding: 1.2rem 1.2rem 0.4rem 1.2rem;
-    margin-bottom: 1rem;
+#app-shell > .gradio-row,
+#app-shell > .gradio-column {
+    gap: 1rem;
 }
-#hero h1 {
-    font-size: 2rem;
-    margin-bottom: 0.3rem;
+#flag-ribbon {
+    margin-bottom: 0.35rem;
+}
+.flag-ribbon {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    align-items: center;
+    justify-content: center;
+}
+.flag-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.5rem 0.8rem;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.82);
+    border: 1px solid rgba(249, 115, 22, 0.16);
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+    font-size: 0.92rem;
+    animation: float-card 6s ease-in-out infinite;
+}
+.flag-pill:nth-child(2n) {
+    animation-delay: 1s;
+}
+.flag-pill:nth-child(3n) {
+    animation-delay: 2s;
+}
+.flag-emoji {
+    font-size: 1.15rem;
+}
+#hero-grid {
+    position: relative;
+    overflow: hidden;
+    padding: 1.2rem;
+    border: 1px solid rgba(249, 115, 22, 0.14);
+    border-radius: 28px;
+    background:
+        radial-gradient(circle at top right, rgba(251, 146, 60, 0.26), transparent 26%),
+        radial-gradient(circle at bottom left, rgba(56, 189, 248, 0.18), transparent 24%),
+        linear-gradient(135deg, rgba(255, 255, 255, 0.92) 0%, rgba(255, 247, 237, 0.96) 54%, rgba(240, 249, 255, 0.94) 100%);
+    box-shadow: 0 24px 60px rgba(15, 23, 42, 0.08);
+}
+#hero-grid::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image:
+        linear-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+    background-size: 24px 24px;
+    pointer-events: none;
+}
+.hero-copy,
+.hero-card-wrap {
+    position: relative;
+    z-index: 1;
+}
+.hero-copy h1 {
+    font-size: clamp(2.4rem, 5vw, 3.65rem);
+    line-height: 1.02;
+    margin-bottom: 0.45rem;
+    color: #7c2d12;
+}
+.hero-copy p {
+    font-size: 1.02rem;
+    color: #7c2d12;
+}
+.hero-kicker {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.45rem 0.75rem;
+    border-radius: 999px;
+    background: rgba(255, 237, 213, 0.94);
+    color: #9a3412;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    font-size: 0.78rem;
+}
+.hero-chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.65rem;
+    margin: 0.9rem 0 1rem 0;
+}
+.hero-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.65rem 0.85rem;
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.88);
+    border: 1px solid rgba(14, 165, 233, 0.14);
+    box-shadow: 0 12px 30px rgba(14, 165, 233, 0.08);
+    color: #0f172a;
+    font-weight: 600;
+}
+.hero-sidecard {
+    position: relative;
+    overflow: hidden;
+    border-radius: 24px;
+    padding: 1.25rem;
+    min-height: 100%;
+    background: linear-gradient(180deg, rgba(14, 165, 233, 0.94) 0%, rgba(14, 116, 144, 0.98) 100%);
+    color: #f8fafc;
+    box-shadow: 0 22px 40px rgba(14, 116, 144, 0.24);
+}
+.hero-sidecard::after {
+    content: "";
+    position: absolute;
+    width: 180px;
+    height: 180px;
+    right: -36px;
+    top: -60px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.12);
+}
+.hero-sidecard h3,
+.hero-sidecard p,
+.hero-sidecard li,
+.hero-sidecard strong {
+    position: relative;
+    z-index: 1;
+}
+.passport-stack {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.7rem;
+    margin-top: 1rem;
+}
+.passport-card {
+    padding: 0.8rem;
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.14);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    backdrop-filter: blur(8px);
+}
+.passport-card strong {
+    display: block;
+    font-size: 1.45rem;
+    margin-bottom: 0.15rem;
+}
+#practice-highlights {
+    margin-top: 0.2rem;
+}
+.highlights-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.9rem;
+}
+.highlight-card {
+    padding: 1rem 1rem 1.1rem 1rem;
+    border-radius: 22px;
+    background: rgba(255, 255, 255, 0.9);
+    border: 1px solid rgba(148, 163, 184, 0.16);
+    box-shadow: 0 16px 34px rgba(15, 23, 42, 0.06);
+}
+.highlight-card strong {
+    display: block;
+    margin-bottom: 0.22rem;
+    color: #0f172a;
+    font-size: 1.02rem;
+}
+.highlight-card span {
+    font-size: 1.35rem;
+    display: inline-block;
+    margin-bottom: 0.4rem;
+}
+.highlight-card p,
+.panel-heading p,
+.control-tip,
+.control-tip p,
+.examples-note,
+#app-shell .prose p,
+#app-shell .prose li,
+#app-shell .prose span,
+#app-shell label,
+#app-shell .wrap {
+    color: #475569 !important;
+}
+.highlight-card p,
+.control-tip,
+.examples-note {
+    margin: 0;
+}
+.hero-copy .prose p,
+.hero-copy .prose li,
+.hero-copy .prose strong {
+    color: #7c2d12 !important;
+}
+.hero-sidecard,
+.hero-sidecard p,
+.hero-sidecard span,
+.hero-sidecard li,
+.hero-sidecard strong,
+.hero-sidecard h3,
+.passport-card span {
+    color: #f8fafc !important;
+}
+.builder-panel textarea,
+.control-panel input,
+.control-panel textarea,
+.control-panel select,
+.results-panel,
+.status-panel {
+    color: #0f172a !important;
+}
+.builder-panel,
+.control-panel,
+.results-panel,
+.status-panel {
+    border: 1px solid rgba(148, 163, 184, 0.15);
+    border-radius: 24px;
+    background: rgba(255, 255, 255, 0.84);
+    box-shadow: 0 18px 36px rgba(15, 23, 42, 0.05);
+    padding: 0.2rem;
+}
+.panel-heading {
+    margin: 0.2rem 0 0.8rem 0;
+}
+.panel-heading strong {
+    font-size: 1.05rem;
+    color: #0f172a;
+}
+.panel-heading p {
+    margin: 0.2rem 0 0 0;
+    color: #475569;
+    font-size: 0.94rem;
+}
+.control-tip {
+    padding: 0.85rem 0.95rem;
+    border-radius: 18px;
+    background: linear-gradient(135deg, rgba(255, 247, 237, 0.96) 0%, rgba(224, 242, 254, 0.92) 100%);
+    border: 1px solid rgba(56, 189, 248, 0.14);
+    color: #0f172a;
+    margin-bottom: 0.55rem;
+}
+.control-tip strong {
+    display: block;
+    color: #9a3412;
+    margin-bottom: 0.18rem;
+}
+.examples-note {
+    margin-top: 0.45rem;
+    color: #64748b;
+    font-size: 0.9rem;
+}
+#results-shell .gradio-row,
+#results-shell .gradio-column {
+    gap: 0.9rem;
 }
 #status-output, #assumptions-output {
     min-height: 3rem;
+}
+#status-output,
+#assumptions-output,
+#focus-verbs-output,
+#routine-output {
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.86);
+}
+#results-shell .gradio-dataframe,
+#results-shell .gradio-file,
+#results-shell .gradio-audio {
+    border-radius: 18px;
 }
 #preview-audio label span svg.feather-music,
 #preview-audio .empty .icon svg.feather-music {
@@ -91,7 +367,118 @@ APP_CSS = """
     height: 1.45rem;
     opacity: 0.72;
 }
+@keyframes float-card {
+    0%,
+    100% {
+        transform: translateY(0);
+    }
+    50% {
+        transform: translateY(-4px);
+    }
+}
+@media (max-width: 900px) {
+    .highlights-grid,
+    .passport-stack {
+        grid-template-columns: 1fr;
+    }
+}
 """
+
+FLAG_BADGES = [
+    ("🇫🇷", "French"),
+    ("🇪🇸", "Spanish"),
+    ("🇩🇪", "German"),
+    ("🇮🇹", "Italian"),
+    ("🇵🇹", "Portuguese"),
+    ("🇯🇵", "Japanese"),
+    ("🇬🇧", "English"),
+]
+
+
+def build_flag_ribbon_html() -> str:
+    pills = "".join(
+        f'<span class="flag-pill"><span class="flag-emoji">{flag}</span> {language}</span>'
+        for flag, language in FLAG_BADGES
+    )
+    return f'<div class="flag-ribbon">{pills}</div>'
+
+
+def build_hero_chips_html() -> str:
+    return """
+    <div class="hero-chip-row">
+        <div class="hero-chip">🗣️ Real-life phrases</div>
+        <div class="hero-chip">🎧 Downloadable audio drills</div>
+        <div class="hero-chip">📚 Focus verbs and routines</div>
+    </div>
+    """.strip()
+
+
+def build_hero_sidecard_html() -> str:
+    return """
+    <div class="hero-sidecard">
+        <p><strong>Travel-day energy, classroom clarity.</strong></p>
+        <h3>Build a mini language camp from one prompt.</h3>
+        <p>Pick a target language, describe your routines, and get sentences, verbs, a practice plan, and audio you can loop on the go.</p>
+        <div class="passport-stack">
+            <div class="passport-card">
+                <strong>45 min</strong>
+                <span>structured daily practice</span>
+            </div>
+            <div class="passport-card">
+                <strong>ZIP + WAV</strong>
+                <span>portable study kit</span>
+            </div>
+            <div class="passport-card">
+                <strong>Daily life</strong>
+                <span>groceries, travel, neighbors, family</span>
+            </div>
+            <div class="passport-card">
+                <strong>Bright cues</strong>
+                <span>easy scanning and quick reuse</span>
+            </div>
+        </div>
+    </div>
+    """.strip()
+
+
+def build_highlights_html() -> str:
+    return f"""
+    <div class="highlights-grid">
+        <div class="highlight-card">
+            <span>🌍</span>
+            <strong>{len(FLAG_BADGES)} study destinations</strong>
+            <p>Supported target languages stay visible up front so the app immediately reads as language practice.</p>
+        </div>
+        <div class="highlight-card">
+            <span>🧠</span>
+            <strong>Routine-first learning</strong>
+            <p>The generator turns errands, work, travel, and family talk into reusable phrases instead of abstract textbook examples.</p>
+        </div>
+        <div class="highlight-card">
+            <span>🎶</span>
+            <strong>Listen, shadow, repeat</strong>
+            <p>Audio previews, bundled tracks, and focus verbs make the pack feel ready for real daily repetition.</p>
+        </div>
+    </div>
+    """.strip()
+
+
+def build_control_tip_html() -> str:
+    return """
+    <div class="control-tip">
+        <strong>Cheerful builder</strong>
+        Add situations you actually live through. The more concrete the prompt, the more useful the sentence pack and audio drills become.
+    </div>
+    """.strip()
+
+
+def build_panel_heading_html(title: str, description: str) -> str:
+    return f"""
+    <div class="panel-heading">
+        <strong>{title}</strong>
+        <p>{description}</p>
+    </div>
+    """.strip()
 
 def build_model_stack_md(target_language: str) -> str:
     tts_backend = get_tts_backend_config(target_language)
@@ -199,30 +586,63 @@ def build_app() -> gr.Blocks:
 
     with gr.Blocks(title=APP_TITLE) as demo:
         with gr.Column(elem_id="app-shell"):
-            with gr.Column(elem_id="hero"):
-                gr.Markdown(f"# {APP_TITLE}")
-                gr.Markdown(APP_DESCRIPTION)
-                with gr.Accordion("Model stack", open=False):
-                    model_stack_output = gr.Markdown(build_model_stack_md(TARGET_LANGUAGE))
+            gr.HTML(build_flag_ribbon_html(), elem_id="flag-ribbon")
 
-            with gr.Row():
-                with gr.Column(scale=5):
+            with gr.Row(elem_id="hero-grid", equal_height=True):
+                with gr.Column(scale=7, elem_classes="hero-copy"):
+                    gr.Markdown(
+                        """
+                        <div class="hero-kicker">Bright language practice studio</div>
+                        """.strip()
+                    )
+                    gr.Markdown(f"# {APP_TITLE}")
+                    gr.Markdown(APP_DESCRIPTION)
+                    gr.HTML(build_hero_chips_html())
+                    with gr.Accordion("Model stack", open=False):
+                        model_stack_output = gr.Markdown(build_model_stack_md(TARGET_LANGUAGE))
+
+                with gr.Column(scale=5, elem_classes="hero-card-wrap"):
+                    gr.HTML(build_hero_sidecard_html())
+
+            gr.HTML(build_highlights_html(), elem_id="practice-highlights")
+
+            with gr.Row(equal_height=True):
+                with gr.Column(scale=5, elem_classes="builder-panel"):
+                    gr.HTML(
+                        build_panel_heading_html(
+                            "Describe your world",
+                            "Feed the app the conversations you actually expect, then let it generate a study pack around them.",
+                        )
+                    )
                     use_cases = gr.Textbox(
                         label="Describe your general use cases",
                         lines=8,
                         value=default_prompt,
                         placeholder="Explain the conversations and situations you expect in daily life.",
                     )
-                with gr.Column(scale=2):
+                    gr.Markdown(
+                        "Bring in scenes like commuting, shopping, school pickup, appointments, travel, home life, or work."
+                    )
+
+                with gr.Column(scale=3, elem_classes="control-panel"):
+                    gr.HTML(
+                        build_panel_heading_html(
+                            "Choose your practice setup",
+                            "Mix a target language, source language, and sentence count for a pack sized to your day.",
+                        )
+                    )
+                    gr.HTML(build_control_tip_html())
                     target_language = gr.Dropdown(
                         choices=get_supported_language_labels(),
                         value=TARGET_LANGUAGE,
                         label="Target language",
+                        info="Select the language you want to practice hearing and speaking.",
                     )
                     native_language = gr.Dropdown(
                         choices=get_native_language_choices(),
                         value="English",
                         label="Source language",
+                        info="Translations and explanations are grounded in this language.",
                     )
                     sentence_count = gr.Slider(
                         minimum=20,
@@ -233,54 +653,115 @@ def build_app() -> gr.Blocks:
                         info=f"Audio is grouped into WAV files of up to {SENTENCES_PER_AUDIO_FILE} sentences each.",
                     )
                     build_button = gr.Button("Build study pack", variant="primary")
+                    gr.Markdown(
+                        '<div class="examples-note">Try a routine-focused prompt first, then widen the sentence count once the tone feels right.</div>'
+                    )
 
-            with gr.Row():
-                status_output = gr.Markdown(label="Status", elem_id="status-output")
-            with gr.Accordion("Notes", open=False):
-                assumptions_output = gr.Markdown(label="Assumptions", elem_id="assumptions-output")
-            routine_output = gr.Markdown(label="Study routine")
-            focus_verbs_output = gr.Markdown(label="Focus verbs")
-            table_output = gr.Dataframe(
-                headers=[
-                    "Scenario",
-                    "Source sentence",
-                    "Target sentence",
-                    "Verb",
-                ],
-                datatype=["str", "str", "str", "str"],
-                row_count=12,
-                column_count=4,
-                interactive=False,
-                wrap=False,
-                label="Generated sentence pack",
-            )
+            with gr.Column(elem_id="results-shell"):
+                with gr.Row(equal_height=True):
+                    with gr.Column(scale=2, elem_classes="status-panel"):
+                        gr.HTML(
+                            build_panel_heading_html(
+                                "Build status",
+                                "See whether the current pack completed and what assets were generated.",
+                            )
+                        )
+                        status_output = gr.Markdown(label="Status", elem_id="status-output")
+                    with gr.Column(scale=1, elem_classes="status-panel"):
+                        gr.HTML(
+                            build_panel_heading_html(
+                                "Focus verbs",
+                                "Quick anchors for repetition before you review the full table.",
+                            )
+                        )
+                        focus_verbs_output = gr.Markdown(label="Focus verbs", elem_id="focus-verbs-output")
 
-            with gr.Row():
-                preview_audio = gr.Audio(
-                    label="Preview the first generated audio track",
-                    elem_id="preview-audio",
+                with gr.Row(equal_height=True):
+                    with gr.Column(scale=2, elem_classes="results-panel"):
+                        gr.HTML(
+                            build_panel_heading_html(
+                                "Practice routine",
+                                "A compact 45-minute loop you can run daily with the generated material.",
+                            )
+                        )
+                        routine_output = gr.Markdown(label="Study routine", elem_id="routine-output")
+                    with gr.Column(scale=1, elem_classes="results-panel"):
+                        gr.HTML(
+                            build_panel_heading_html(
+                                "Notes and assumptions",
+                                "Review what the planner inferred from your prompt before re-running with edits.",
+                            )
+                        )
+                        assumptions_output = gr.Markdown(label="Assumptions", elem_id="assumptions-output")
+
+                with gr.Column(elem_classes="results-panel"):
+                    gr.HTML(
+                        build_panel_heading_html(
+                            "Generated sentence pack",
+                            "Scan the scenarios, compare source and target phrasing, and isolate the verbs worth drilling.",
+                        )
+                    )
+                    table_output = gr.Dataframe(
+                        headers=[
+                            "Scenario",
+                            "Source sentence",
+                            "Target sentence",
+                            "Verb",
+                        ],
+                        datatype=["str", "str", "str", "str"],
+                        row_count=12,
+                        column_count=4,
+                        interactive=False,
+                        wrap=False,
+                        label="Generated sentence pack",
+                    )
+
+                with gr.Row(equal_height=True):
+                    with gr.Column(scale=2, elem_classes="results-panel"):
+                        gr.HTML(
+                            build_panel_heading_html(
+                                "Preview audio",
+                                "Listen to the first generated track before downloading the full bundle.",
+                            )
+                        )
+                        preview_audio = gr.Audio(
+                            label="Preview the first generated audio track",
+                            elem_id="preview-audio",
+                        )
+                    with gr.Column(scale=1, elem_classes="results-panel"):
+                        gr.HTML(
+                            build_panel_heading_html(
+                                "Downloads",
+                                "Grab the ZIP bundle or use the individual WAV files directly.",
+                            )
+                        )
+                        zip_output = gr.File(label="Download the full study pack ZIP")
+                        audio_files = gr.File(label="Generated audio tracks", file_count="multiple")
+
+            with gr.Column(elem_classes="builder-panel"):
+                gr.HTML(
+                    build_panel_heading_html(
+                        "Example prompts",
+                        "Use one of these cheerful everyday scenarios to seed your first pack quickly.",
+                    )
                 )
-                zip_output = gr.File(label="Download the full study pack ZIP")
-
-            audio_files = gr.File(label="Generated audio tracks", file_count="multiple")
-
-            gr.Examples(
-                examples=[
-                    [
-                        "I need French for grocery shopping, greeting neighbors, going to the doctor, and asking simple travel questions.",
-                        "French",
-                        "English",
-                        20,
+                gr.Examples(
+                    examples=[
+                        [
+                            "I need French for grocery shopping, greeting neighbors, going to the doctor, and asking simple travel questions.",
+                            "French",
+                            "English",
+                            20,
+                        ],
+                        [
+                            "I want French for talking to parents at school pickup, ordering coffee, texting friends, and making weekend plans.",
+                            "French",
+                            "English",
+                            20,
+                        ],
                     ],
-                    [
-                        "I want French for talking to parents at school pickup, ordering coffee, texting friends, and making weekend plans.",
-                        "French",
-                        "English",
-                        20,
-                    ],
-                ],
-                inputs=[use_cases, target_language, native_language, sentence_count],
-            )
+                    inputs=[use_cases, target_language, native_language, sentence_count],
+                )
 
             target_language.change(
                 fn=build_model_stack_md,
