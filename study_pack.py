@@ -30,7 +30,7 @@ DEFAULT_FALLBACK_ENV_PATH = Path("/Users/Kwadwo/Documents/PROJECTS/NITA-bill-rev
 OUTPUT_ROOT = Path(tempfile.gettempdir()) / "daily_language_practice"
 SENTENCES_PER_AUDIO_FILE = 20
 TARGET_LANGUAGE = "French"
-NATIVE_LANGUAGE_CHOICES = ["English", "French", "Spanish", "German", "Portuguese"]
+NATIVE_LANGUAGE_CHOICES = ["English", "French", "Spanish", "German", "Portuguese", "Italian", "Japanese"]
 
 GENERATION_MODEL_OPTIONS = {
     "tiny-aya-global": {
@@ -56,17 +56,89 @@ MODAL_TTS_MODEL = "kyutai/tts-1.6b-en_fr"
 MODAL_TTS_VOICE_REPO = "kyutai/tts-voices"
 MODAL_TTS_VOICE = "voice-donations/Hugo_the_frenchie_enhanced.wav"
 MODAL_TTS_PARAMS = 1_800_000_000
+KOKORO_TTS_MODEL = "hexgrad/Kokoro-82M"
+KOKORO_TTS_PARAMS = 82_000_000
+MMS_GERMAN_TTS_MODEL = "facebook/mms-tts-deu"
+MMS_TTS_PARAMS = 36_285_936
 MODAL_TTS_TIMEOUT_SECONDS = 120.0
-FRENCH_ONLY_ERROR = "This v1 build currently supports French only."
-MACOS_FRENCH_VOICE_CANDIDATES = ("Amélie", "Thomas")
+UNCONFIGURED_TTS_MODEL_LABEL = "configured per-language Modal TTS"
 AUDIO_SENTENCE_PAUSE_SECONDS = 2.0
 DEFAULT_MACOS_SPEECH_RATE = 180
 SLOW_AUDIO_SPEED_MULTIPLIER = 0.9
 HF_GENERATION_ATTEMPTS_PER_BATCH = 3
 TRANSLATION_ATTEMPTS_PER_BATCH = 3
 
-SUPPORTED_LANGUAGES: dict[str, dict[str, str]] = {
-    TARGET_LANGUAGE: {"tts_code": "fr", "language_label": TARGET_LANGUAGE},
+SUPPORTED_LANGUAGES: dict[str, dict[str, object]] = {
+    "English": {
+        "tts_code": "en",
+        "env_suffix": "EN",
+        "backend_kind": "kyutai",
+        "default_tts_model": MODAL_TTS_MODEL,
+        "default_tts_voice_repo": MODAL_TTS_VOICE_REPO,
+        "default_tts_voice": "unmute-prod-website/p329_022.wav",
+        "default_tts_params": MODAL_TTS_PARAMS,
+        "macos_voice_candidates": ("Samantha", "Alex", "Daniel"),
+    },
+    "French": {
+        "tts_code": "fr",
+        "env_suffix": "FR",
+        "backend_kind": "kyutai",
+        "default_tts_model": MODAL_TTS_MODEL,
+        "default_tts_voice_repo": MODAL_TTS_VOICE_REPO,
+        "default_tts_voice": MODAL_TTS_VOICE,
+        "default_tts_params": MODAL_TTS_PARAMS,
+        "macos_voice_candidates": ("Amélie", "Thomas"),
+    },
+    "Spanish": {
+        "tts_code": "es",
+        "env_suffix": "ES",
+        "backend_kind": "kokoro",
+        "default_tts_model": KOKORO_TTS_MODEL,
+        "default_tts_voice_repo": "",
+        "default_tts_voice": "ef_dora",
+        "default_tts_params": KOKORO_TTS_PARAMS,
+        "macos_voice_candidates": ("Monica", "Jorge", "Paulina"),
+    },
+    "German": {
+        "tts_code": "de",
+        "env_suffix": "DE",
+        "backend_kind": "mms",
+        "default_tts_model": MMS_GERMAN_TTS_MODEL,
+        "default_tts_voice_repo": "",
+        "default_tts_voice": "checkpoint default",
+        "default_tts_params": MMS_TTS_PARAMS,
+        "macos_voice_candidates": ("Anna", "Markus", "Petra"),
+    },
+    "Italian": {
+        "tts_code": "it",
+        "env_suffix": "IT",
+        "backend_kind": "kokoro",
+        "default_tts_model": KOKORO_TTS_MODEL,
+        "default_tts_voice_repo": "",
+        "default_tts_voice": "if_sara",
+        "default_tts_params": KOKORO_TTS_PARAMS,
+        "macos_voice_candidates": ("Alice", "Luca", "Federica"),
+    },
+    "Portuguese": {
+        "tts_code": "pt",
+        "env_suffix": "PT",
+        "backend_kind": "kokoro",
+        "default_tts_model": KOKORO_TTS_MODEL,
+        "default_tts_voice_repo": "",
+        "default_tts_voice": "pf_dora",
+        "default_tts_params": KOKORO_TTS_PARAMS,
+        "macos_voice_candidates": ("Joana", "Luciana", "Felipe"),
+    },
+    "Japanese": {
+        "tts_code": "ja",
+        "env_suffix": "JA",
+        "backend_kind": "kokoro",
+        "default_tts_model": KOKORO_TTS_MODEL,
+        "default_tts_voice_repo": "",
+        "default_tts_voice": "jf_alpha",
+        "default_tts_params": KOKORO_TTS_PARAMS,
+        "macos_voice_candidates": ("Kyoko", "Otoya"),
+    },
 }
 
 
@@ -157,11 +229,29 @@ class GenerationPlanError(RuntimeError):
 
 
 @dataclass(slots=True)
+class TTSBackendConfig:
+    language_label: str
+    language_code: str
+    env_suffix: str
+    backend_kind: str
+    base_url: str
+    auth_token: str
+    model_label: str
+    voice_repo: str
+    voice_label: str
+    params: int
+
+
+@dataclass(slots=True)
 class ModalTTSClient:
     base_url: str
     auth_token: str
     timeout_seconds: float = MODAL_TTS_TIMEOUT_SECONDS
     transport: Callable[[str, bytes, dict[str, str], float], bytes] | None = None
+    language_code: str = "fr"
+    model_label: str = MODAL_TTS_MODEL
+    voice_label: str = MODAL_TTS_VOICE
+    language_label: str = TARGET_LANGUAGE
 
     def synthesize_track(self, sentences: list[str], slow_audio: bool) -> bytes:
         cleaned_sentences = [sentence.strip() for sentence in sentences if sentence.strip()]
@@ -169,10 +259,18 @@ class ModalTTSClient:
             raise ValueError("At least one non-empty sentence is required for TTS synthesis.")
 
         if not self.base_url.strip():
-            raise RuntimeError("Missing MODAL_TTS_BASE_URL. Add it to .env or to the fallback env file.")
+            raise RuntimeError(
+                f"Missing Modal TTS base URL for {self.language_label}. "
+                f"Set MODAL_TTS_BASE_URL_{get_tts_code(self.language_label).upper()} "
+                "or the legacy MODAL_TTS_BASE_URL."
+            )
 
         payload = json.dumps(
-            {"sentences": cleaned_sentences, "slow_audio": slow_audio}
+            {
+                "sentences": cleaned_sentences,
+                "language": self.language_code,
+                "slow_audio": slow_audio,
+            }
         ).encode("utf-8")
         headers = {
             "Accept": "audio/wav",
@@ -191,16 +289,71 @@ class ModalTTSClient:
 
 
 def ensure_supported_target_language(language_name: str) -> None:
-    if language_name != TARGET_LANGUAGE:
-        raise ValueError(FRENCH_ONLY_ERROR)
+    if language_name not in SUPPORTED_LANGUAGES:
+        supported_labels = ", ".join(get_supported_language_labels())
+        raise ValueError(
+            f"Unsupported target language: {language_name}. Supported target languages: {supported_labels}."
+        )
 
 
-def get_model_stack_summary() -> str:
-    total_params = HF_GENERATION_PARAMS + TRANSLATION_MODEL_PARAMS + MODAL_TTS_PARAMS
+def get_language_config(language_name: str) -> dict[str, object]:
+    ensure_supported_target_language(language_name)
+    return SUPPORTED_LANGUAGES[language_name]
+
+
+def _language_env_key(base_name: str, env_suffix: str) -> str:
+    return f"{base_name}_{env_suffix}"
+
+
+def _resolve_language_env(base_name: str, env_suffix: str) -> str:
+    scoped_value = os.getenv(_language_env_key(base_name, env_suffix), "").strip()
+    if scoped_value:
+        return scoped_value
+    return os.getenv(base_name, "").strip()
+
+
+def _resolve_tts_params(env_suffix: str, default_value: int) -> int:
+    raw_value = _resolve_language_env("MODAL_TTS_PARAMS", env_suffix)
+    if not raw_value:
+        return default_value
+
+    try:
+        return int(raw_value)
+    except ValueError:
+        logger.warning(
+            "Invalid TTS parameter count %r for language suffix %s. Falling back to %s.",
+            raw_value,
+            env_suffix,
+            default_value,
+        )
+        return default_value
+
+
+def get_tts_backend_config(language_name: str) -> TTSBackendConfig:
+    config = get_language_config(language_name)
+    env_suffix = str(config["env_suffix"])
+    return TTSBackendConfig(
+        language_label=language_name,
+        language_code=str(config["tts_code"]),
+        env_suffix=env_suffix,
+        backend_kind=str(config["backend_kind"]),
+        base_url=_resolve_language_env("MODAL_TTS_BASE_URL", env_suffix),
+        auth_token=_resolve_language_env("MODAL_TTS_AUTH_TOKEN", env_suffix),
+        model_label=_resolve_language_env("MODAL_TTS_MODEL", env_suffix) or str(config["default_tts_model"]),
+        voice_repo=_resolve_language_env("MODAL_TTS_VOICE_REPO", env_suffix)
+        or str(config["default_tts_voice_repo"]),
+        voice_label=_resolve_language_env("MODAL_TTS_VOICE", env_suffix) or str(config["default_tts_voice"]),
+        params=_resolve_tts_params(env_suffix, int(config["default_tts_params"])),
+    )
+
+
+def get_model_stack_summary(target_language: str = TARGET_LANGUAGE) -> str:
+    tts_backend = get_tts_backend_config(target_language)
+    total_params = HF_GENERATION_PARAMS + TRANSLATION_MODEL_PARAMS + tts_backend.params
     return (
         f"{HF_GENERATION_MODEL} ({HF_GENERATION_PARAMS:,} params) + "
         f"{TRANSLATION_MODEL} ({TRANSLATION_MODEL_PARAMS:,} params) + "
-        f"{MODAL_TTS_MODEL} (~{MODAL_TTS_PARAMS:,} params) = ~{total_params:,} total params"
+        f"{tts_backend.model_label} (~{tts_backend.params:,} params) = ~{total_params:,} total params"
     )
 
 
@@ -221,7 +374,7 @@ def load_environment() -> Path | None:
 
 
 def get_supported_language_labels() -> list[str]:
-    return [TARGET_LANGUAGE]
+    return list(SUPPORTED_LANGUAGES)
 
 
 def get_native_language_choices() -> list[str]:
@@ -229,16 +382,15 @@ def get_native_language_choices() -> list[str]:
 
 
 def get_tts_code(language_name: str) -> str:
-    ensure_supported_target_language(language_name)
-    return SUPPORTED_LANGUAGES[language_name]["tts_code"]
+    return str(get_language_config(language_name)["tts_code"])
 
 
 def get_modal_tts_client(
+    target_language: str,
     transport: Callable[[str, bytes, dict[str, str], float], bytes] | None = None,
 ) -> ModalTTSClient:
     load_environment()
-    base_url = os.getenv("MODAL_TTS_BASE_URL", "").strip()
-    auth_token = os.getenv("MODAL_TTS_AUTH_TOKEN", "").strip()
+    backend = get_tts_backend_config(target_language)
     timeout_raw = os.getenv("MODAL_TTS_TIMEOUT_SECONDS", "").strip()
 
     timeout_seconds = MODAL_TTS_TIMEOUT_SECONDS
@@ -249,10 +401,14 @@ def get_modal_tts_client(
             raise RuntimeError("MODAL_TTS_TIMEOUT_SECONDS must be a valid number.") from exc
 
     return ModalTTSClient(
-        base_url=base_url,
-        auth_token=auth_token,
+        base_url=backend.base_url,
+        auth_token=backend.auth_token,
         timeout_seconds=timeout_seconds,
         transport=transport,
+        language_code=backend.language_code,
+        model_label=backend.model_label,
+        voice_label=backend.voice_label,
+        language_label=backend.language_label,
     )
 
 
@@ -693,7 +849,8 @@ def _default_modal_tts_transport(url: str, payload: bytes, headers: dict[str, st
     return body
 
 
-def _resolve_macos_french_voice() -> str | None:
+def _resolve_macos_voice(target_language: str) -> str | None:
+    ensure_supported_target_language(target_language)
     if sys.platform != "darwin":
         return None
 
@@ -713,7 +870,8 @@ def _resolve_macos_french_voice() -> str | None:
         return None
 
     installed_voices = {line.split(maxsplit=1)[0] for line in result.stdout.splitlines() if line.strip()}
-    for voice in MACOS_FRENCH_VOICE_CANDIDATES:
+    voice_candidates = tuple(get_language_config(target_language)["macos_voice_candidates"])
+    for voice in voice_candidates:
         if voice in installed_voices:
             return voice
     return None
@@ -723,10 +881,13 @@ def _write_macos_fallback_wav(
     sentences: list[str],
     destination: Path,
     slow_audio: bool,
+    target_language: str,
 ) -> str:
-    voice = _resolve_macos_french_voice()
+    voice = _resolve_macos_voice(target_language)
     if not voice:
-        raise RuntimeError("No macOS French voice is available for local fallback audio generation.")
+        raise RuntimeError(
+            f"No macOS {target_language} voice is available for local fallback audio generation."
+        )
 
     say_binary = shutil.which("say")
     afconvert_binary = shutil.which("afconvert")
@@ -991,19 +1152,25 @@ def default_tts_writer(
     sentences: list[str],
     destination: Path,
     slow_audio: bool,
+    target_language: str,
     client: ModalTTSClient | None = None,
 ) -> str:
-    tts_client = client or get_modal_tts_client()
+    tts_client = client or get_modal_tts_client(target_language)
     try:
         audio_bytes = tts_client.synthesize_track(sentences, slow_audio=slow_audio)
     except RuntimeError:
-        fallback_voice = _resolve_macos_french_voice()
+        fallback_voice = _resolve_macos_voice(target_language)
         if not fallback_voice:
             raise
-        return _write_macos_fallback_wav(sentences, destination, slow_audio)
+        return _write_macos_fallback_wav(
+            sentences,
+            destination,
+            slow_audio,
+            target_language=target_language,
+        )
 
     destination.write_bytes(audio_bytes)
-    return f"Modal ({MODAL_TTS_MODEL})"
+    return f"Modal ({tts_client.model_label})"
 
 
 def chunk_cards(cards: list[SentenceCard], chunk_size: int = SENTENCES_PER_AUDIO_FILE) -> list[list[SentenceCard]]:
@@ -1019,12 +1186,13 @@ def create_study_pack(
     routine_steps: list[StudyRoutineStep] | None = None,
     slow_audio: bool = False,
     output_root: Path | None = None,
-    tts_writer: Callable[[list[str], Path, bool], str | None] | None = None,
+    tts_writer: Callable[[list[str], Path, bool, str], str | None] | None = None,
 ) -> StudyPackBundle:
     if not cards:
         raise ValueError("At least one sentence card is required.")
 
     ensure_supported_target_language(target_language)
+    tts_backend = get_tts_backend_config(target_language)
     get_tts_code(target_language)
     writer = tts_writer or default_tts_writer
     base_dir = output_root or OUTPUT_ROOT
@@ -1032,14 +1200,14 @@ def create_study_pack(
     session_dir.mkdir(parents=True, exist_ok=True)
 
     audio_paths: list[Path] = []
-    tts_backend_label = f"Modal ({MODAL_TTS_MODEL})"
+    tts_backend_label = f"Modal ({tts_backend.model_label})"
     for batch_index, card_batch in enumerate(chunk_cards(cards), start=1):
         start_number = ((batch_index - 1) * SENTENCES_PER_AUDIO_FILE) + 1
         end_number = start_number + len(card_batch) - 1
         filename = f"{batch_index:02d}_sentences_{start_number:02d}_{end_number:02d}.wav"
         audio_path = session_dir / filename
         track_sentences = [card.target_sentence for card in card_batch]
-        backend_label = writer(track_sentences, audio_path, slow_audio)
+        backend_label = writer(track_sentences, audio_path, slow_audio, target_language)
         if backend_label:
             tts_backend_label = backend_label
         audio_paths.append(audio_path)
@@ -1076,8 +1244,8 @@ def create_study_pack(
         f"Audio track count: {len(audio_paths)}",
         f"Sentences per audio file: up to {SENTENCES_PER_AUDIO_FILE}",
         f"TTS service: {tts_backend_label}",
-        f"TTS voice profile: {MODAL_TTS_VOICE}",
-        f"Model stack: {get_model_stack_summary()}",
+        f"TTS voice profile: {tts_backend.voice_label}",
+        f"Model stack: {get_model_stack_summary(target_language)}",
         "",
         "Focus verbs:",
     ]

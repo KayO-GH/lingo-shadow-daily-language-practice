@@ -8,7 +8,6 @@ import pytest
 import study_pack
 
 from study_pack import (
-    FRENCH_ONLY_ERROR,
     MODAL_TTS_MODEL,
     MODAL_TTS_VOICE,
     SENTENCES_PER_AUDIO_FILE,
@@ -24,6 +23,7 @@ from study_pack import (
     get_model_stack_summary,
     get_native_language_choices,
     get_supported_language_labels,
+    get_tts_backend_config,
     normalize_plan,
     translate_sentence_cards,
 )
@@ -40,9 +40,25 @@ def test_extract_json_payload_reads_fenced_json() -> None:
     assert payload["sentences"][0]["target_sentence"] == "Bonjour"
 
 
-def test_supported_languages_are_french_only() -> None:
-    assert get_supported_language_labels() == [TARGET_LANGUAGE]
-    assert get_native_language_choices() == ["English", "French", "Spanish", "German", "Portuguese"]
+def test_supported_languages_are_multilingual() -> None:
+    assert get_supported_language_labels() == [
+        "English",
+        "French",
+        "Spanish",
+        "German",
+        "Italian",
+        "Portuguese",
+        "Japanese",
+    ]
+    assert get_native_language_choices() == [
+        "English",
+        "French",
+        "Spanish",
+        "German",
+        "Portuguese",
+        "Italian",
+        "Japanese",
+    ]
 
 
 def test_normalize_plan_dedupes_by_target_sentence_and_reads_routine() -> None:
@@ -130,6 +146,7 @@ def test_modal_tts_client_posts_sentence_lists_and_slow_audio() -> None:
     assert captured["url"] == "https://tts.example.com/synthesize-track"
     assert captured["payload"] == {
         "sentences": ["Bonjour.", "Comment allez-vous ?"],
+        "language": "fr",
         "slow_audio": True,
     }
     assert captured["headers"] == {
@@ -138,6 +155,35 @@ def test_modal_tts_client_posts_sentence_lists_and_slow_audio() -> None:
         "Authorization": "Bearer secret-token",
     }
     assert captured["timeout"] == 45.0
+
+
+def test_get_tts_backend_config_uses_language_specific_env(monkeypatch) -> None:
+    monkeypatch.setenv("MODAL_TTS_BASE_URL_ES", "https://spanish-tts.example.com")
+    monkeypatch.setenv("MODAL_TTS_AUTH_TOKEN_ES", "spanish-token")
+    monkeypatch.setenv("MODAL_TTS_MODEL_ES", "facebook/mms-tts-spa")
+    monkeypatch.setenv("MODAL_TTS_VOICE_ES", "es-voice")
+    monkeypatch.setenv("MODAL_TTS_PARAMS_ES", "123456789")
+
+    backend = get_tts_backend_config("Spanish")
+
+    assert backend.base_url == "https://spanish-tts.example.com"
+    assert backend.auth_token == "spanish-token"
+    assert backend.model_label == "facebook/mms-tts-spa"
+    assert backend.voice_label == "es-voice"
+    assert backend.params == 123456789
+
+
+def test_get_tts_backend_config_uses_historical_defaults() -> None:
+    spanish_backend = get_tts_backend_config("Spanish")
+    german_backend = get_tts_backend_config("German")
+    japanese_backend = get_tts_backend_config("Japanese")
+
+    assert spanish_backend.model_label == "hexgrad/Kokoro-82M"
+    assert spanish_backend.voice_label == "ef_dora"
+    assert german_backend.model_label == "facebook/mms-tts-deu"
+    assert german_backend.voice_label == "checkpoint default"
+    assert japanese_backend.model_label == "hexgrad/Kokoro-82M"
+    assert japanese_backend.voice_label == "jf_alpha"
 
 
 def test_create_study_pack_writes_bundle_and_zip(tmp_path: Path) -> None:
@@ -160,10 +206,15 @@ def test_create_study_pack_writes_bundle_and_zip(tmp_path: Path) -> None:
         ),
     ]
 
-    calls: list[tuple[list[str], bool]] = []
+    calls: list[tuple[list[str], bool, str]] = []
 
-    def fake_tts_writer(sentences: list[str], destination: Path, slow_audio: bool) -> None:
-        calls.append((sentences, slow_audio))
+    def fake_tts_writer(
+        sentences: list[str],
+        destination: Path,
+        slow_audio: bool,
+        target_language: str,
+    ) -> None:
+        calls.append((sentences, slow_audio, target_language))
         destination.write_bytes(b"RIFFfakewav")
 
     bundle = create_study_pack(
@@ -187,7 +238,7 @@ def test_create_study_pack_writes_bundle_and_zip(tmp_path: Path) -> None:
     assert (bundle.session_dir / "study_pack.json").exists()
     assert (bundle.session_dir / "daily_routine.md").exists()
     assert (bundle.session_dir / "focus_verbs.txt").exists()
-    assert calls == [(["J'ai besoin de pommes.", "Ce bus va ou ?"], False)]
+    assert calls == [(["J'ai besoin de pommes.", "Ce bus va ou ?"], False, TARGET_LANGUAGE)]
 
     payload = json.loads((bundle.session_dir / "study_pack.json").read_text(encoding="utf-8"))
     assert payload[0]["target_sentence"] == "J'ai besoin de pommes."
@@ -208,10 +259,15 @@ def test_create_study_pack_batches_every_twenty_sentences(tmp_path: Path) -> Non
         for index in range(1, SENTENCES_PER_AUDIO_FILE + 2)
     ]
 
-    calls: list[list[str]] = []
+    calls: list[tuple[list[str], str]] = []
 
-    def fake_tts_writer(sentences: list[str], destination: Path, slow_audio: bool) -> None:
-        calls.append(sentences)
+    def fake_tts_writer(
+        sentences: list[str],
+        destination: Path,
+        slow_audio: bool,
+        target_language: str,
+    ) -> None:
+        calls.append((sentences, target_language))
         destination.write_bytes(b"RIFFfakewav")
 
     bundle = create_study_pack(
@@ -224,11 +280,12 @@ def test_create_study_pack_batches_every_twenty_sentences(tmp_path: Path) -> Non
     assert len(bundle.audio_paths) == 2
     assert bundle.audio_paths[0].name == "01_sentences_01_20.wav"
     assert bundle.audio_paths[1].name == "02_sentences_21_21.wav"
-    assert len(calls[0]) == SENTENCES_PER_AUDIO_FILE
-    assert calls[1] == ["Target sentence 21"]
+    assert len(calls[0][0]) == SENTENCES_PER_AUDIO_FILE
+    assert calls[0][1] == TARGET_LANGUAGE
+    assert calls[1] == (["Target sentence 21"], TARGET_LANGUAGE)
 
 
-def test_create_study_pack_rejects_non_french_target_language(tmp_path: Path) -> None:
+def test_create_study_pack_rejects_unsupported_target_language(tmp_path: Path) -> None:
     cards = [
         SentenceCard(
             scenario="Transit",
@@ -239,8 +296,8 @@ def test_create_study_pack_rejects_non_french_target_language(tmp_path: Path) ->
         )
     ]
 
-    with pytest.raises(ValueError, match=FRENCH_ONLY_ERROR):
-        create_study_pack(cards=cards, target_language="Spanish", output_root=tmp_path)
+    with pytest.raises(ValueError, match="Unsupported target language"):
+        create_study_pack(cards=cards, target_language="Dutch", output_root=tmp_path)
 
 
 def test_model_stack_summary_mentions_qwen_tiny_aya_and_kyutai() -> None:
@@ -248,6 +305,12 @@ def test_model_stack_summary_mentions_qwen_tiny_aya_and_kyutai() -> None:
     assert "Qwen/Qwen3-8B" in summary
     assert "CohereLabs/tiny-aya-global" in summary
     assert "kyutai/tts-1.6b-en_fr" in summary
+
+
+def test_model_stack_summary_uses_selected_target_language_model(monkeypatch) -> None:
+    monkeypatch.setenv("MODAL_TTS_MODEL_ES", "facebook/mms-tts-spa")
+    summary = get_model_stack_summary("Spanish")
+    assert "facebook/mms-tts-spa" in summary
 
 
 def test_build_results_rows_uses_four_columns_with_infinitive_verbs() -> None:
@@ -267,11 +330,11 @@ def test_build_results_rows_uses_four_columns_with_infinitive_verbs() -> None:
     assert rows == [["Travel", "I need to go now.", "Je dois partir maintenant.", "to go"]]
 
 
-def test_generate_sentence_cards_rejects_non_french_target_language() -> None:
-    with pytest.raises(ValueError, match=FRENCH_ONLY_ERROR):
+def test_generate_sentence_cards_rejects_unsupported_target_language() -> None:
+    with pytest.raises(ValueError, match="Unsupported target language"):
         generate_sentence_cards(
             use_cases="I need Spanish for errands and daily conversations.",
-            target_language="Spanish",
+            target_language="Dutch",
             native_language="English",
             sentence_count=20,
             client=SimpleNamespace(),

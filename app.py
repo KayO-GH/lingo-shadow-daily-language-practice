@@ -8,12 +8,9 @@ import os
 import gradio as gr
 
 from study_pack import (
-    FRENCH_ONLY_ERROR,
     GeneratedStudyPlan,
     HF_GENERATION_MODEL,
     HF_GENERATION_PARAMS,
-    MODAL_TTS_MODEL,
-    MODAL_TTS_PARAMS,
     SENTENCES_PER_AUDIO_FILE,
     TARGET_LANGUAGE,
     TRANSLATION_MODEL,
@@ -21,15 +18,18 @@ from study_pack import (
     build_results_rows,
     create_study_pack,
     generate_sentence_cards,
+    get_model_stack_summary,
     get_native_language_choices,
+    get_supported_language_labels,
+    get_tts_backend_config,
     load_environment,
 )
 
 APP_TITLE = "LingoShadow - Daily Language Practice"
 logger = logging.getLogger(__name__)
 APP_DESCRIPTION = """
-Turn your real daily routines into a practical French study system.
-Describe the situations you actually live in and the app will build high-frequency French sentences, focus verbs, a 45-minute routine, and downloadable audio tracks generated through a dedicated Modal-backed French TTS service.
+Turn your real daily routines into a practical language study system.
+Describe the situations you actually live in and the app will build high-frequency target-language sentences, focus verbs, a 45-minute routine, and downloadable audio tracks generated through a target-language-specific Modal TTS service.
 """.strip()
 
 APP_THEME = gr.themes.Soft(
@@ -93,13 +93,17 @@ APP_CSS = """
 }
 """
 
-MODEL_STACK_MD = (
-    f"- Generation: `{HF_GENERATION_MODEL}` ({HF_GENERATION_PARAMS:,} params)\n"
-    f"- Translation: `{TRANSLATION_MODEL}` ({TRANSLATION_MODEL_PARAMS:,} params)\n"
-    f"- TTS: `{MODAL_TTS_MODEL}` (~{MODAL_TTS_PARAMS:,} params) via Modal\n"
-    f"- Total: **~{HF_GENERATION_PARAMS + TRANSLATION_MODEL_PARAMS + MODAL_TTS_PARAMS:,}** params\n"
-    "- Current scope: **French-only audio in v1**"
-)
+def build_model_stack_md(target_language: str) -> str:
+    tts_backend = get_tts_backend_config(target_language)
+    total_params = HF_GENERATION_PARAMS + TRANSLATION_MODEL_PARAMS + tts_backend.params
+    return (
+        f"- Generation: `{HF_GENERATION_MODEL}` ({HF_GENERATION_PARAMS:,} params)\n"
+        f"- Translation: `{TRANSLATION_MODEL}` ({TRANSLATION_MODEL_PARAMS:,} params)\n"
+        f"- TTS for {target_language}: `{tts_backend.model_label}` (~{tts_backend.params:,} params) via Modal\n"
+        f"- TTS voice profile: `{tts_backend.voice_label}`\n"
+        f"- Total: **~{total_params:,}** params\n"
+        f"- Stack summary: `{get_model_stack_summary(target_language)}`"
+    )
 
 
 def resolve_server_port() -> int | None:
@@ -122,6 +126,7 @@ def build_error_state(message: str):
 
 def run_pack_builder(
     use_cases: str,
+    target_language: str,
     native_language: str,
     sentence_count: int,
 ):
@@ -135,20 +140,18 @@ def run_pack_builder(
     try:
         plan: GeneratedStudyPlan = generate_sentence_cards(
             use_cases=cleaned_use_cases,
-            target_language=TARGET_LANGUAGE,
+            target_language=target_language,
             native_language=native_language,
             sentence_count=sentence_count,
         )
         bundle = create_study_pack(
             cards=plan.cards,
-            target_language=TARGET_LANGUAGE,
+            target_language=target_language,
             focus_verbs=plan.focus_verbs,
             routine_steps=plan.routine_steps,
             slow_audio=True,
         )
     except ValueError as exc:
-        if str(exc) == FRENCH_ONLY_ERROR:
-            return build_error_state(str(exc))
         logger.exception("Validation failure while building the study pack")
         return build_error_state(str(exc))
     except RuntimeError as exc:
@@ -158,7 +161,7 @@ def run_pack_builder(
         return build_error_state("An unexpected error stopped the build. Check the terminal logs, then try again.")
 
     status_md = (
-        f"Built **{len(plan.cards)}** study sentences for **{TARGET_LANGUAGE}** and generated "
+        f"Built **{len(plan.cards)}** study sentences for **{target_language}** and generated "
         f"**{len(bundle.audio_paths)}** downloadable audio track(s) with up to "
         f"**{SENTENCES_PER_AUDIO_FILE}** sentences per file using "
         f"`{HF_GENERATION_MODEL}` for pack generation, `{TRANSLATION_MODEL}` for translation, "
@@ -200,7 +203,7 @@ def build_app() -> gr.Blocks:
                 gr.Markdown(f"# {APP_TITLE}")
                 gr.Markdown(APP_DESCRIPTION)
                 with gr.Accordion("Model stack", open=False):
-                    gr.Markdown(MODEL_STACK_MD)
+                    model_stack_output = gr.Markdown(build_model_stack_md(TARGET_LANGUAGE))
 
             with gr.Row():
                 with gr.Column(scale=5):
@@ -208,13 +211,13 @@ def build_app() -> gr.Blocks:
                         label="Describe your general use cases",
                         lines=8,
                         value=default_prompt,
-                        placeholder="Explain the French conversations and situations you expect in daily life.",
+                        placeholder="Explain the conversations and situations you expect in daily life.",
                     )
                 with gr.Column(scale=2):
-                    gr.Textbox(
+                    target_language = gr.Dropdown(
+                        choices=get_supported_language_labels(),
                         value=TARGET_LANGUAGE,
                         label="Target language",
-                        interactive=False,
                     )
                     native_language = gr.Dropdown(
                         choices=get_native_language_choices(),
@@ -229,7 +232,7 @@ def build_app() -> gr.Blocks:
                         label="Sentence count",
                         info=f"Audio is grouped into WAV files of up to {SENTENCES_PER_AUDIO_FILE} sentences each.",
                     )
-                    build_button = gr.Button("Build French study pack", variant="primary")
+                    build_button = gr.Button("Build study pack", variant="primary")
 
             with gr.Row():
                 status_output = gr.Markdown(label="Status", elem_id="status-output")
@@ -265,21 +268,29 @@ def build_app() -> gr.Blocks:
                 examples=[
                     [
                         "I need French for grocery shopping, greeting neighbors, going to the doctor, and asking simple travel questions.",
+                        "French",
                         "English",
                         20,
                     ],
                     [
                         "I want French for talking to parents at school pickup, ordering coffee, texting friends, and making weekend plans.",
+                        "French",
                         "English",
                         20,
                     ],
                 ],
-                inputs=[use_cases, native_language, sentence_count],
+                inputs=[use_cases, target_language, native_language, sentence_count],
+            )
+
+            target_language.change(
+                fn=build_model_stack_md,
+                inputs=[target_language],
+                outputs=[model_stack_output],
             )
 
             build_button.click(
                 fn=run_pack_builder,
-                inputs=[use_cases, native_language, sentence_count],
+                inputs=[use_cases, target_language, native_language, sentence_count],
                 outputs=[
                     status_output,
                     assumptions_output,

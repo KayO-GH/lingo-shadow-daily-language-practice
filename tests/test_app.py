@@ -14,6 +14,7 @@ def test_run_pack_builder_returns_inline_error_state_for_generation_failures(mon
 
     result = app.run_pack_builder(
         "I work from home, buy groceries in person, chat with neighbors, and handle simple errands in French.",
+        "French",
         "English",
         20,
     )
