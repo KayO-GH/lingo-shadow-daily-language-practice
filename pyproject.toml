@@ -15,6 +15,9 @@ dependencies = [
     "pytest==8.2.0",
 ]
 
+[project.scripts]
+"gradio.app" = "app:main"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 

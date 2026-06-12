@@ -91,6 +91,8 @@ body {
     border: 1px solid rgba(249, 115, 22, 0.16);
     box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
     font-size: 0.92rem;
+    color: #334155 !important;
+    font-weight: 600;
     animation: float-card 6s ease-in-out infinite;
 }
 .flag-pill:nth-child(2n) {
@@ -133,7 +135,8 @@ body {
     font-size: clamp(2.4rem, 5vw, 3.65rem);
     line-height: 1.02;
     margin-bottom: 0.45rem;
-    color: #7c2d12;
+    color: #7c2d12 !important;
+    font-weight: 800;
 }
 .hero-copy p {
     font-size: 1.02rem;
@@ -146,8 +149,8 @@ body {
     padding: 0.45rem 0.75rem;
     border-radius: 999px;
     background: rgba(255, 237, 213, 0.94);
-    color: #9a3412;
-    font-weight: 600;
+    color: #9a3412 !important;
+    font-weight: 700;
     letter-spacing: 0.02em;
     text-transform: uppercase;
     font-size: 0.78rem;
@@ -167,8 +170,8 @@ body {
     background: rgba(255, 255, 255, 0.88);
     border: 1px solid rgba(14, 165, 233, 0.14);
     box-shadow: 0 12px 30px rgba(14, 165, 233, 0.08);
-    color: #0f172a;
-    font-weight: 600;
+    color: #0f172a !important;
+    font-weight: 700;
 }
 .hero-sidecard {
     position: relative;
@@ -214,6 +217,7 @@ body {
     display: block;
     font-size: 1.45rem;
     margin-bottom: 0.15rem;
+    color: #f8fafc !important;
 }
 #practice-highlights {
     margin-top: 0.2rem;
@@ -233,8 +237,9 @@ body {
 .highlight-card strong {
     display: block;
     margin-bottom: 0.22rem;
-    color: #0f172a;
+    color: #0f172a !important;
     font-size: 1.02rem;
+    font-weight: 800;
 }
 .highlight-card span {
     font-size: 1.35rem;
@@ -261,6 +266,11 @@ body {
 .hero-copy .prose p,
 .hero-copy .prose li,
 .hero-copy .prose strong {
+    color: #7c2d12 !important;
+}
+.hero-copy .prose h1,
+.hero-copy .prose h2,
+.hero-copy .prose h3 {
     color: #7c2d12 !important;
 }
 .hero-sidecard,
@@ -295,7 +305,8 @@ body {
 }
 .panel-heading strong {
     font-size: 1.05rem;
-    color: #0f172a;
+    color: #0f172a !important;
+    font-weight: 800;
 }
 .panel-heading p {
     margin: 0.2rem 0 0 0;
@@ -312,7 +323,7 @@ body {
 }
 .control-tip strong {
     display: block;
-    color: #9a3412;
+    color: #9a3412 !important;
     margin-bottom: 0.18rem;
 }
 .examples-note {
@@ -790,5 +801,9 @@ def build_app() -> gr.Blocks:
 demo = build_app()
 
 
-if __name__ == "__main__":
+def main() -> None:
     demo.launch(theme=APP_THEME, css=APP_CSS, server_port=resolve_server_port())
+
+
+if __name__ == "__main__":
+    main()
