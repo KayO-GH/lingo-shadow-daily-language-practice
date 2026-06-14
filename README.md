@@ -8,6 +8,11 @@ sdk_version: 6.17.3
 app_file: app.py
 python_version: "3.12"
 pinned: false
+tags:
+  - track:backyard
+  - sponsor:openai
+  - sponsor:modal
+  - achievement:fieldnotes
 ---
 
 # LingoShadow - Daily Language Practice
