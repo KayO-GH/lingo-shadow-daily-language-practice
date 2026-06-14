@@ -75,6 +75,102 @@ def test_stream_pack_builder_yields_visible_progress_before_generation(monkeypat
     ]
 
 
+def test_stream_pack_builder_emits_success_notice_once_on_completion(monkeypatch) -> None:
+    notices: list[tuple[str, dict[str, object]]] = []
+
+    class FakeStep:
+        minutes = 15
+        title = "Shadow"
+        instructions = "Repeat the target sentences aloud."
+
+    class FakeCard:
+        scenario = "Groceries"
+        source_sentence = "I need fruit."
+        target_sentence = "J'ai besoin de fruits."
+        verb_lemma = "avoir besoin"
+
+    class FakePlan:
+        cards = [FakeCard()]
+        assumptions = ["The learner shops in person."]
+        rationale = "Focus on recurring errands first."
+        routine_steps = [FakeStep()]
+        focus_verbs = ["avoir besoin"]
+
+    class FakeBundle:
+        audio_paths = ["track-1.mp3"]
+        tts_backend_label = "kyutai/tts-1.6b-en_fr"
+        preview_audio_path = "preview.mp3"
+        zip_path = "pack.zip"
+
+    monkeypatch.setattr(app, "generate_sentence_cards", lambda **_: FakePlan())
+    monkeypatch.setattr(app, "create_study_pack", lambda **_: FakeBundle())
+    monkeypatch.setattr(app.gr, "Success", lambda message, **kwargs: notices.append((message, kwargs)))
+
+    updates = list(
+        app.stream_pack_builder(
+            "I work from home, buy groceries in person, chat with neighbors, and handle simple errands in French.",
+            "French",
+            "English",
+            DEFAULT_SENTENCE_COUNT,
+            progress=lambda *_args, **_kwargs: None,
+        )
+    )
+
+    assert len(updates) == 4
+    assert notices == [
+        (
+            "Study pack ready for French.",
+            {
+                "duration": app.BUILD_SUCCESS_NOTICE_DURATION_SECONDS,
+                "title": "Study pack ready",
+            },
+        )
+    ]
+    assert "Built **1** study sentences for **French**" in updates[-1][0]
+
+
+def test_stream_pack_builder_does_not_emit_success_notice_on_runtime_failure(monkeypatch) -> None:
+    notices: list[tuple[str, dict[str, object]]] = []
+
+    def fail_generation(**_: object):
+        raise RuntimeError("generation failed")
+
+    monkeypatch.setattr(app, "generate_sentence_cards", fail_generation)
+    monkeypatch.setattr(app.gr, "Success", lambda message, **kwargs: notices.append((message, kwargs)))
+
+    updates = list(
+        app.stream_pack_builder(
+            "I work from home, buy groceries in person, chat with neighbors, and handle simple errands in French.",
+            "French",
+            "English",
+            DEFAULT_SENTENCE_COUNT,
+            progress=lambda *_args, **_kwargs: None,
+        )
+    )
+
+    assert notices == []
+    assert "Could not build the study pack" in updates[-1][0]
+
+
+def test_stream_pack_builder_does_not_emit_success_notice_on_validation_failure(monkeypatch) -> None:
+    notices: list[tuple[str, dict[str, object]]] = []
+
+    monkeypatch.setattr(app.gr, "Success", lambda message, **kwargs: notices.append((message, kwargs)))
+
+    updates = list(
+        app.stream_pack_builder(
+            "I work from home, buy groceries in person, chat with neighbors, and handle simple errands in French.",
+            "French",
+            "English",
+            MAX_SENTENCE_COUNT + 1,
+            progress=lambda *_args, **_kwargs: None,
+        )
+    )
+
+    assert notices == []
+    assert "Could not build the study pack" in updates[-1][0]
+
+
 def test_warmup_selected_language_ignores_failures(monkeypatch) -> None:
     def fail_warmup(_: str) -> None:
         raise RuntimeError("boom")

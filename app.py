@@ -28,6 +28,7 @@ from study_pack import (
 
 APP_TITLE = "LingoShadow - Daily Language Practice"
 logger = logging.getLogger(__name__)
+BUILD_SUCCESS_NOTICE_DURATION_SECONDS = None
 APP_DESCRIPTION = """
 Turn your real daily routines into a practical language study system.
 Describe the situations you actually live in and the app will build high-frequency target-language sentences, focus verbs, a 45-minute routine, and downloadable audio tracks generated through a target-language-specific Modal TTS service.
@@ -1013,6 +1014,11 @@ def stream_pack_builder(
         )
 
         progress(1.0, desc="Study pack ready")
+        gr.Success(
+            f"Study pack ready for {target_language}.",
+            duration=BUILD_SUCCESS_NOTICE_DURATION_SECONDS,
+            title="Study pack ready",
+        )
         yield build_success_state(plan, target_language, bundle)
     except ValueError as exc:
         logger.exception("Validation failure while building the study pack")
