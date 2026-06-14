@@ -40,6 +40,41 @@ def test_run_pack_builder_rejects_out_of_range_sentence_count() -> None:
     assert f"between {MIN_SENTENCE_COUNT} and {MAX_SENTENCE_COUNT}" in result[0]
 
 
+def test_stream_pack_builder_yields_visible_progress_before_generation(monkeypatch) -> None:
+    generation_started = False
+    progress_calls: list[tuple[float, str]] = []
+
+    def fake_generation(**_: object):
+        nonlocal generation_started
+        generation_started = True
+        raise RuntimeError("stop after progress")
+
+    def fake_progress(value: float, desc: str) -> None:
+        progress_calls.append((value, desc))
+
+    monkeypatch.setattr(app, "generate_sentence_cards", fake_generation)
+
+    stream = app.stream_pack_builder(
+        "I work from home, buy groceries in person, chat with neighbors, and handle simple errands in French.",
+        "French",
+        "English",
+        DEFAULT_SENTENCE_COUNT,
+        progress=fake_progress,
+    )
+
+    first_update = next(stream)
+    second_update = next(stream)
+
+    assert generation_started is False
+    assert "build-progress-card" in first_update[0]
+    assert "Starting build" in first_update[0]
+    assert "Generating sentence pack" in second_update[0]
+    assert progress_calls == [
+        (0.05, "Starting study pack build"),
+        (0.35, "Generating and translating sentences"),
+    ]
+
+
 def test_warmup_selected_language_ignores_failures(monkeypatch) -> None:
     def fail_warmup(_: str) -> None:
         raise RuntimeError("boom")
@@ -65,3 +100,13 @@ def test_app_config_uses_new_sentence_count_range_and_registers_warmup_events() 
     warmup_api_names = [name for name in api_names if isinstance(name, str) and name.startswith("warmup_selected_language")]
     assert len(warmup_api_names) == 2
     assert "build_model_stack_md" in api_names
+    assert "stream_pack_builder" in api_names
+
+
+def test_app_css_keeps_generated_result_markdown_readable() -> None:
+    assert "#results-shell .prose h3" in app.APP_CSS
+    assert "#results-shell .prose strong" in app.APP_CSS
+    assert "#results-shell .prose li::marker" in app.APP_CSS
+    assert "padding: 0.9rem 1rem !important;" in app.APP_CSS
+    assert "#results-shell .prose > :first-child" in app.APP_CSS
+    assert "color: #0f172a !important;" in app.APP_CSS

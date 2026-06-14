@@ -508,6 +508,95 @@ body {
 #routine-output {
     border-radius: 18px;
     background: rgba(255, 255, 255, 0.86);
+    box-sizing: border-box;
+    overflow: hidden;
+    padding: 0.9rem 1rem !important;
+}
+#results-shell .prose,
+#results-shell .prose p,
+#results-shell .prose li,
+#results-shell .prose span {
+    color: #334155 !important;
+}
+#results-shell .prose {
+    margin: 0 !important;
+}
+#results-shell .prose h1,
+#results-shell .prose h2,
+#results-shell .prose h3,
+#results-shell .prose h4,
+#results-shell .prose strong {
+    color: #0f172a !important;
+}
+#results-shell .prose h1,
+#results-shell .prose h2,
+#results-shell .prose h3,
+#results-shell .prose h4 {
+    margin-top: 0 !important;
+    margin-bottom: 0.65rem !important;
+    line-height: 1.18;
+}
+#results-shell .prose p,
+#results-shell .prose li {
+    line-height: 1.5;
+}
+#results-shell .prose > :first-child {
+    margin-top: 0 !important;
+}
+#results-shell .prose > :last-child {
+    margin-bottom: 0 !important;
+}
+#results-shell .prose li::marker {
+    color: #64748b !important;
+}
+#results-shell .prose code {
+    color: #f8fafc !important;
+    background: #1e293b !important;
+    border: 1px solid rgba(15, 23, 42, 0.16);
+    border-radius: 6px;
+}
+.build-progress-card {
+    padding: 0.9rem 1rem;
+    border-radius: 18px;
+    background: linear-gradient(135deg, rgba(255, 247, 237, 0.96) 0%, rgba(224, 242, 254, 0.9) 100%);
+    border: 1px solid rgba(249, 115, 22, 0.2);
+}
+.build-progress-card strong {
+    display: block;
+    color: #9a3412 !important;
+    font-size: 1rem;
+    margin-bottom: 0.25rem;
+}
+.build-progress-card span {
+    color: #334155 !important;
+}
+.build-progress-track {
+    position: relative;
+    overflow: hidden;
+    height: 0.75rem;
+    margin: 0.75rem 0 0.45rem 0;
+    border-radius: 999px;
+    background: rgba(148, 163, 184, 0.18);
+}
+.build-progress-fill {
+    height: 100%;
+    min-width: 10%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #f97316 0%, #f43f5e 48%, #0ea5e9 100%);
+    box-shadow: 0 8px 22px rgba(249, 115, 22, 0.28);
+    transition: width 240ms ease;
+}
+.build-progress-fill::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.58), transparent);
+    animation: progress-shimmer 1.2s linear infinite;
+}
+.build-progress-percent {
+    font-size: 0.86rem;
+    font-weight: 800;
+    color: #0f172a !important;
 }
 #results-shell .gradio-dataframe,
 #results-shell .gradio-file,
@@ -567,6 +656,14 @@ body {
     }
     50% {
         transform: translateY(-4px);
+    }
+}
+@keyframes progress-shimmer {
+    0% {
+        transform: translateX(-100%);
+    }
+    100% {
+        transform: translateX(100%);
     }
 }
 @media (max-width: 900px) {
@@ -699,6 +796,65 @@ def build_error_state(message: str):
     )
 
 
+def build_progress_state(stage: str, detail: str, percent: int):
+    bounded_percent = max(0, min(100, percent))
+    status_md = f"""
+<div class="build-progress-card">
+  <strong>{stage}</strong>
+  <span>{detail}</span>
+  <div class="build-progress-track" aria-label="Build progress">
+    <div class="build-progress-fill" style="width: {bounded_percent}%"></div>
+  </div>
+  <div class="build-progress-percent">{bounded_percent}% complete</div>
+</div>
+""".strip()
+
+    return (
+        status_md,
+        "### Working assumptions\nWaiting for the planner to finish.",
+        "### 45-minute routine\nThe routine will appear after sentence generation completes.",
+        "### Focus verbs\nFocus verbs will appear after generation.",
+        [],
+        None,
+        None,
+        [],
+    )
+
+
+def build_success_state(
+    plan: GeneratedStudyPlan,
+    target_language: str,
+    bundle,
+):
+    status_md = (
+        f"Built **{len(plan.cards)}** study sentences for **{target_language}** and generated "
+        f"**{len(bundle.audio_paths)}** downloadable audio track(s) with up to "
+        f"**{SENTENCES_PER_AUDIO_FILE}** sentences per file using "
+        f"`{HF_GENERATION_MODEL}` for pack generation, `{TRANSLATION_MODEL}` for translation, "
+        f"plus **{bundle.tts_backend_label}**."
+    )
+    assumptions_md = (
+        "### Working assumptions\n"
+        + "\n".join(f"- {item}" for item in plan.assumptions)
+        + f"\n\n### Pack logic\n{plan.rationale}"
+    )
+    routine_md = "### 45-minute routine\n" + "\n".join(
+        f"- **{step.minutes} min:** {step.title} - {step.instructions}" for step in plan.routine_steps
+    )
+    focus_verbs_md = "### Focus verbs\n" + ", ".join(plan.focus_verbs)
+
+    return (
+        status_md,
+        assumptions_md,
+        routine_md,
+        focus_verbs_md,
+        build_results_rows(plan.cards),
+        str(bundle.preview_audio_path),
+        str(bundle.zip_path),
+        [str(path) for path in bundle.audio_paths],
+    )
+
+
 def warmup_selected_language(target_language: str) -> None:
     try:
         warmup_tts_backend(target_language)
@@ -743,33 +899,76 @@ def run_pack_builder(
         logger.exception("Unexpected failure while building the study pack")
         return build_error_state("An unexpected error stopped the build. Check the terminal logs, then try again.")
 
-    status_md = (
-        f"Built **{len(plan.cards)}** study sentences for **{target_language}** and generated "
-        f"**{len(bundle.audio_paths)}** downloadable audio track(s) with up to "
-        f"**{SENTENCES_PER_AUDIO_FILE}** sentences per file using "
-        f"`{HF_GENERATION_MODEL}` for pack generation, `{TRANSLATION_MODEL}` for translation, "
-        f"plus **{bundle.tts_backend_label}**."
-    )
-    assumptions_md = (
-        "### Working assumptions\n"
-        + "\n".join(f"- {item}" for item in plan.assumptions)
-        + f"\n\n### Pack logic\n{plan.rationale}"
-    )
-    routine_md = "### 45-minute routine\n" + "\n".join(
-        f"- **{step.minutes} min:** {step.title} - {step.instructions}" for step in plan.routine_steps
-    )
-    focus_verbs_md = "### Focus verbs\n" + ", ".join(plan.focus_verbs)
+    return build_success_state(plan, target_language, bundle)
 
-    return (
-        status_md,
-        assumptions_md,
-        routine_md,
-        focus_verbs_md,
-        build_results_rows(plan.cards),
-        str(bundle.preview_audio_path),
-        str(bundle.zip_path),
-        [str(path) for path in bundle.audio_paths],
-    )
+
+def stream_pack_builder(
+    use_cases: str,
+    target_language: str,
+    native_language: str,
+    sentence_count: int,
+    progress=gr.Progress(track_tqdm=True),
+):
+    load_environment()
+    cleaned_use_cases = (use_cases or "").strip()
+    if len(cleaned_use_cases) < 20:
+        yield build_error_state(
+            "Describe your daily use cases in a bit more detail so the pack can be personalized."
+        )
+        return
+
+    try:
+        sentence_count = validate_sentence_count(sentence_count)
+    except ValueError as exc:
+        logger.exception("Validation failure while building the study pack")
+        yield build_error_state(str(exc))
+        return
+
+    try:
+        progress(0.05, desc="Starting study pack build")
+        yield build_progress_state(
+            "Starting build",
+            "Preparing the prompt, model settings, and output workspace.",
+            5,
+        )
+
+        progress(0.35, desc="Generating and translating sentences")
+        yield build_progress_state(
+            "Generating sentence pack",
+            f"Creating {sentence_count} practical sentences, translations, focus verbs, and routine notes.",
+            35,
+        )
+        plan: GeneratedStudyPlan = generate_sentence_cards(
+            use_cases=cleaned_use_cases,
+            target_language=target_language,
+            native_language=native_language,
+            sentence_count=sentence_count,
+        )
+
+        progress(0.75, desc="Creating audio and downloads")
+        yield build_progress_state(
+            "Creating audio tracks",
+            f"Synthesizing MP3 audio and packaging downloads for {len(plan.cards)} sentences.",
+            75,
+        )
+        bundle = create_study_pack(
+            cards=plan.cards,
+            target_language=target_language,
+            focus_verbs=plan.focus_verbs,
+            routine_steps=plan.routine_steps,
+            slow_audio=True,
+        )
+
+        progress(1.0, desc="Study pack ready")
+        yield build_success_state(plan, target_language, bundle)
+    except ValueError as exc:
+        logger.exception("Validation failure while building the study pack")
+        yield build_error_state(str(exc))
+    except RuntimeError as exc:
+        yield build_error_state(str(exc))
+    except Exception:
+        logger.exception("Unexpected failure while building the study pack")
+        yield build_error_state("An unexpected error stopped the build. Check the terminal logs, then try again.")
 
 
 def build_app() -> gr.Blocks:
@@ -988,7 +1187,7 @@ def build_app() -> gr.Blocks:
             )
 
             build_button.click(
-                fn=run_pack_builder,
+                fn=stream_pack_builder,
                 inputs=[use_cases, target_language, native_language, sentence_count],
                 outputs=[
                     status_output,
