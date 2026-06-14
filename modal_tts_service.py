@@ -99,6 +99,22 @@ image = (
 )
 cache_volume = modal.Volume.from_name("daily-language-practice-tts-cache", create_if_missing=True)
 app = modal.App(APP_NAME, image=image)
+AUDIO_PARALLEL_WORKERS = 3
+WORKER_FUNCTION_KWARGS = {
+    "gpu": "L40S",
+    "timeout": 900,
+    "scaledown_window": 300,
+    "max_containers": AUDIO_PARALLEL_WORKERS,
+    "secrets": [modal.Secret.from_name(MODAL_AUTH_SECRET_NAME)],
+    "volumes": {"/cache": cache_volume},
+}
+WEB_FUNCTION_KWARGS = {
+    "timeout": 900,
+    "scaledown_window": 300,
+    "secrets": [modal.Secret.from_name(MODAL_AUTH_SECRET_NAME)],
+    "volumes": {"/cache": cache_volume},
+}
+_BACKEND_CACHE: dict[str, dict[str, object]] = {}
 
 
 def _pcm_to_wav_bytes(pcm, sample_rate: int) -> bytes:
@@ -166,167 +182,286 @@ def _encode_mp3_bytes(wav_bytes: bytes) -> bytes:
     return result.stdout
 
 
-@app.function(
-    gpu="L40S",
-    timeout=900,
-    scaledown_window=300,
-    secrets=[modal.Secret.from_name(MODAL_AUTH_SECRET_NAME)],
-    volumes={"/cache": cache_volume},
-)
-@modal.asgi_app()
-def fastapi_app():
+def _wav_bytes_to_pcm(wav_bytes: bytes) -> tuple[object, int]:
     import numpy as np
-    import torch
-    from fastapi import Body, FastAPI, Header, HTTPException, Response
+
+    buffer = io.BytesIO(wav_bytes)
+    with wave.open(buffer, "rb") as wav_file:
+        if wav_file.getnchannels() != 1 or wav_file.getsampwidth() != 2:
+            raise RuntimeError("Expected mono 16-bit WAV audio from worker synthesis.")
+        sample_rate = wav_file.getframerate()
+        pcm_i16 = np.frombuffer(wav_file.readframes(wav_file.getnframes()), dtype="<i2")
+    return pcm_i16.astype(np.float32) / 32767.0, sample_rate
+
+
+def _get_language_config(language_code: str) -> dict[str, str]:
+    config = LANGUAGE_ROUTER.get(language_code)
+    if config is None:
+        supported = ", ".join(sorted(LANGUAGE_ROUTER))
+        raise ValueError(f"Unsupported `language`. Supported values: {supported}.")
+    return config
+
+
+def _load_kyutai_backend(config: dict[str, str]) -> dict[str, object]:
     from moshi.models.loaders import CheckpointInfo
     from moshi.models.tts import TTSModel
+
+    checkpoint_info = CheckpointInfo.from_hf_repo(config["model"])
+    tts_model = TTSModel.from_checkpoint_info(
+        checkpoint_info,
+        n_q=32,
+        temp=0.6,
+        device="cuda",
+    )
+    voice_path = tts_model.get_voice_path(config["voice"])
+    condition_attributes = tts_model.make_condition_attributes([voice_path], cfg_coef=2.0)
+    return {
+        "kind": "kyutai",
+        "model": tts_model,
+        "condition_attributes": condition_attributes,
+        "sample_rate": KYUTAI_SAMPLE_RATE,
+    }
+
+
+def _load_mms_backend(config: dict[str, str]) -> dict[str, object]:
+    import torch
     from transformers import AutoTokenizer, VitsModel
 
-    state: dict[str, object] = {"backends": {}}
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    tokenizer = AutoTokenizer.from_pretrained(config["model"])
+    model = VitsModel.from_pretrained(config["model"])
+    model.to(device)
+    return {
+        "kind": "mms",
+        "device": device,
+        "model": model,
+        "tokenizer": tokenizer,
+        "sample_rate": int(model.config.sampling_rate),
+    }
+
+
+def _load_kokoro_backend(config: dict[str, str]) -> dict[str, object]:
+    from kokoro import KPipeline
+
+    pipeline = KPipeline(lang_code=config["lang_code"])
+    return {
+        "kind": "kokoro",
+        "pipeline": pipeline,
+        "voice": config["voice"],
+        "sample_rate": KOKORO_SAMPLE_RATE,
+    }
+
+
+def _ensure_backend(language_code: str) -> dict[str, object]:
+    cached = _BACKEND_CACHE.get(language_code)
+    if isinstance(cached, dict):
+        return cached
+
+    config = _get_language_config(language_code)
+    backend_kind = config["backend"]
+    if backend_kind == "kyutai":
+        backend = _load_kyutai_backend(config)
+    elif backend_kind == "mms":
+        backend = _load_mms_backend(config)
+    elif backend_kind == "kokoro":
+        backend = _load_kokoro_backend(config)
+    else:
+        raise RuntimeError(f"Unsupported backend kind: {backend_kind}")
+
+    _BACKEND_CACHE[language_code] = backend
+    return backend
+
+
+def _synthesize_with_kyutai(text: str, backend: dict[str, object]) -> object:
+    import numpy as np
+    import torch
+
+    tts_model = backend["model"]
+    condition_attributes = backend["condition_attributes"]
+    entries = tts_model.prepare_script([text], padding_between=1)
+    result = tts_model.generate(
+        [entries],
+        [condition_attributes],
+        on_frame=lambda _frame: None,
+    )
+
+    with tts_model.mimi.streaming(1), torch.no_grad():
+        pcm_chunks: list[object] = []
+        for frame in result.frames[tts_model.delay_steps :]:
+            pcm = tts_model.mimi.decode(frame[:, 1:, :]).cpu().numpy()
+            pcm_chunks.append(np.clip(pcm[0, 0], -1.0, 1.0))
+
+    if not pcm_chunks:
+        raise RuntimeError("Kyutai returned no audio frames.")
+
+    return np.concatenate(pcm_chunks, axis=-1)
+
+
+def _synthesize_with_mms(text: str, backend: dict[str, object]) -> object:
+    import numpy as np
+    import torch
+
+    tokenizer = backend["tokenizer"]
+    model = backend["model"]
+    device = backend["device"]
+    inputs = tokenizer(text, return_tensors="pt")
+    if device == "cuda":
+        inputs = {key: value.to(device) for key, value in inputs.items()}
+    with torch.no_grad():
+        waveform = model(**inputs).waveform.squeeze(0).cpu().numpy()
+    return np.asarray(waveform, dtype=np.float32)
+
+
+def _synthesize_with_kokoro(text: str, backend: dict[str, object], slow_audio: bool) -> object:
+    import numpy as np
+
+    pipeline = backend["pipeline"]
+    voice = backend["voice"]
+    speed = SLOW_AUDIO_SPEED_MULTIPLIER if slow_audio else 1.0
+    pcm_chunks: list[object] = []
+    for _, _, audio in pipeline(text, voice=voice, speed=speed):
+        pcm_chunks.append(np.asarray(audio, dtype=np.float32))
+
+    if not pcm_chunks:
+        raise RuntimeError("Kokoro returned no audio frames.")
+
+    return np.concatenate(pcm_chunks, axis=-1)
+
+
+def _synthesize_sentence(text: str, language_code: str, slow_audio: bool) -> tuple[object, int]:
+    backend = _ensure_backend(language_code)
+    sample_rate = backend["sample_rate"]
+    kind = backend["kind"]
+    if kind == "kyutai":
+        pcm = _synthesize_with_kyutai(text, backend)
+    elif kind == "mms":
+        pcm = _synthesize_with_mms(text, backend)
+    elif kind == "kokoro":
+        pcm = _synthesize_with_kokoro(text, backend, slow_audio=slow_audio)
+    else:
+        raise RuntimeError(f"Unsupported loaded backend kind: {kind}")
+
+    return pcm, int(sample_rate)
+
+
+def _synthesize_group_wav(sentences: list[str], language_code: str, slow_audio: bool) -> tuple[bytes, int]:
+    import numpy as np
+
+    cleaned_sentences = [str(sentence).strip() for sentence in sentences if str(sentence).strip()]
+    if not cleaned_sentences:
+        raise ValueError("At least one non-empty sentence is required for TTS synthesis.")
+
+    tracks: list[object] = []
+    track_sample_rate: int | None = None
+    for index, sentence in enumerate(cleaned_sentences):
+        pcm, sample_rate = _synthesize_sentence(sentence, language_code=language_code, slow_audio=slow_audio)
+        if track_sample_rate is None:
+            track_sample_rate = sample_rate
+        elif track_sample_rate != sample_rate:
+            raise RuntimeError("TTS backend returned inconsistent sample rates across the same track.")
+
+        tracks.append(pcm)
+        if index < len(cleaned_sentences) - 1:
+            pause = np.zeros(int(sample_rate * SENTENCE_PAUSE_SECONDS), dtype=np.float32)
+            tracks.append(pause)
+
+    if track_sample_rate is None:
+        raise RuntimeError("No audio was produced.")
+
+    return _pcm_to_wav_bytes(np.concatenate(tracks, axis=-1), track_sample_rate), track_sample_rate
+
+
+def _build_worker_metadata(language_code: str) -> dict[str, object]:
+    config = _get_language_config(language_code)
+    backend = _ensure_backend(language_code)
+    return {
+        "language": language_code,
+        "target_language": config["label"],
+        "backend": config["backend"],
+        "model": config["model"],
+        "voice": config["voice"],
+        "voice_repo": config["voice_repo"],
+        "sample_rate": int(backend["sample_rate"]),
+    }
+
+
+def _split_sentences_for_workers(sentences: list[str], worker_count: int = AUDIO_PARALLEL_WORKERS) -> list[list[str]]:
+    cleaned_sentences = [sentence for sentence in sentences if str(sentence).strip()]
+    if not cleaned_sentences:
+        return []
+
+    active_workers = min(max(1, worker_count), len(cleaned_sentences))
+    base_size, remainder = divmod(len(cleaned_sentences), active_workers)
+    groups: list[list[str]] = []
+    start_index = 0
+    for worker_index in range(active_workers):
+        group_size = base_size + (1 if worker_index < remainder else 0)
+        end_index = start_index + group_size
+        groups.append(cleaned_sentences[start_index:end_index])
+        start_index = end_index
+    return groups
+
+
+def _assemble_parallel_wavs(worker_results: list[dict[str, object]]) -> bytes:
+    import numpy as np
+
+    if not worker_results:
+        raise RuntimeError("No audio was produced.")
+
+    tracks: list[object] = []
+    track_sample_rate: int | None = None
+    for index, result in enumerate(worker_results):
+        wav_bytes = result["wav_bytes"]
+        sample_rate = int(result["sample_rate"])
+        if not isinstance(wav_bytes, bytes):
+            raise RuntimeError("Worker synthesis returned an invalid audio payload.")
+
+        pcm, decoded_sample_rate = _wav_bytes_to_pcm(wav_bytes)
+        if decoded_sample_rate != sample_rate:
+            raise RuntimeError("Worker synthesis returned mismatched sample rate metadata.")
+
+        if track_sample_rate is None:
+            track_sample_rate = sample_rate
+        elif track_sample_rate != sample_rate:
+            raise RuntimeError("TTS backend returned inconsistent sample rates across the same track.")
+
+        tracks.append(pcm)
+        if index < len(worker_results) - 1:
+            pause = np.zeros(int(sample_rate * SENTENCE_PAUSE_SECONDS), dtype=np.float32)
+            tracks.append(pause)
+
+    if track_sample_rate is None:
+        raise RuntimeError("No audio was produced.")
+
+    return _pcm_to_wav_bytes(np.concatenate(tracks, axis=-1), track_sample_rate)
+
+
+@app.function(**WORKER_FUNCTION_KWARGS)
+def synthesize_sentence_group(
+    sentences: list[str],
+    language_code: str,
+    slow_audio: bool,
+    warm_only: bool = False,
+) -> dict[str, object]:
+    os.environ.setdefault("HF_HOME", HF_CACHE_DIR)
+    metadata = _build_worker_metadata(language_code)
+    if warm_only:
+        metadata["warmed"] = True
+        metadata["wav_bytes"] = b""
+        return metadata
+
+    wav_bytes, sample_rate = _synthesize_group_wav(sentences, language_code=language_code, slow_audio=slow_audio)
+    metadata["sample_rate"] = sample_rate
+    metadata["wav_bytes"] = wav_bytes
+    return metadata
+
+
+@app.function(**WEB_FUNCTION_KWARGS)
+@modal.asgi_app()
+def fastapi_app():
+    from fastapi import Body, FastAPI, Header, HTTPException, Response
+
     web_app = FastAPI(title="LingoShadow - Daily Language Practice TTS")
-
-    def get_language_config(language_code: str) -> dict[str, str]:
-        config = LANGUAGE_ROUTER.get(language_code)
-        if config is None:
-            supported = ", ".join(sorted(LANGUAGE_ROUTER))
-            raise HTTPException(
-                status_code=422,
-                detail=f"Unsupported `language`. Supported values: {supported}.",
-            )
-        return config
-
-    def load_kyutai_backend(config: dict[str, str]) -> dict[str, object]:
-        checkpoint_info = CheckpointInfo.from_hf_repo(config["model"])
-        tts_model = TTSModel.from_checkpoint_info(
-            checkpoint_info,
-            n_q=32,
-            temp=0.6,
-            device="cuda",
-        )
-        voice_path = tts_model.get_voice_path(config["voice"])
-        condition_attributes = tts_model.make_condition_attributes([voice_path], cfg_coef=2.0)
-        return {
-            "kind": "kyutai",
-            "model": tts_model,
-            "condition_attributes": condition_attributes,
-            "sample_rate": KYUTAI_SAMPLE_RATE,
-        }
-
-    def load_mms_backend(config: dict[str, str]) -> dict[str, object]:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        tokenizer = AutoTokenizer.from_pretrained(config["model"])
-        model = VitsModel.from_pretrained(config["model"])
-        model.to(device)
-        return {
-            "kind": "mms",
-            "device": device,
-            "model": model,
-            "tokenizer": tokenizer,
-            "sample_rate": int(model.config.sampling_rate),
-        }
-
-    def load_kokoro_backend(config: dict[str, str]) -> dict[str, object]:
-        from kokoro import KPipeline
-
-        pipeline = KPipeline(lang_code=config["lang_code"])
-        return {
-            "kind": "kokoro",
-            "pipeline": pipeline,
-            "voice": config["voice"],
-            "sample_rate": KOKORO_SAMPLE_RATE,
-        }
-
-    def ensure_backend(language_code: str) -> dict[str, object]:
-        backends = state["backends"]
-        assert isinstance(backends, dict)
-        cached = backends.get(language_code)
-        if isinstance(cached, dict):
-            return cached
-
-        config = get_language_config(language_code)
-        backend_kind = config["backend"]
-        if backend_kind == "kyutai":
-            backend = load_kyutai_backend(config)
-        elif backend_kind == "mms":
-            backend = load_mms_backend(config)
-        elif backend_kind == "kokoro":
-            backend = load_kokoro_backend(config)
-        else:
-            raise RuntimeError(f"Unsupported backend kind: {backend_kind}")
-
-        backends[language_code] = backend
-        return backend
-
-    def synthesize_with_kyutai(text: str, backend: dict[str, object]) -> np.ndarray:
-        tts_model = backend["model"]
-        condition_attributes = backend["condition_attributes"]
-        assert isinstance(tts_model, TTSModel)
-
-        entries = tts_model.prepare_script([text], padding_between=1)
-        result = tts_model.generate(
-            [entries],
-            [condition_attributes],
-            on_frame=lambda _frame: None,
-        )
-
-        with tts_model.mimi.streaming(1), torch.no_grad():
-            pcm_chunks: list[np.ndarray] = []
-            for frame in result.frames[tts_model.delay_steps :]:
-                pcm = tts_model.mimi.decode(frame[:, 1:, :]).cpu().numpy()
-                pcm_chunks.append(np.clip(pcm[0, 0], -1.0, 1.0))
-
-        if not pcm_chunks:
-            raise RuntimeError("Kyutai returned no audio frames.")
-
-        return np.concatenate(pcm_chunks, axis=-1)
-
-    def synthesize_with_mms(text: str, backend: dict[str, object]) -> np.ndarray:
-        tokenizer = backend["tokenizer"]
-        model = backend["model"]
-        device = backend["device"]
-        assert isinstance(model, VitsModel)
-        assert isinstance(device, str)
-
-        inputs = tokenizer(text, return_tensors="pt")
-        if device == "cuda":
-            inputs = {key: value.to(device) for key, value in inputs.items()}
-        with torch.no_grad():
-            waveform = model(**inputs).waveform.squeeze(0).cpu().numpy()
-        return np.asarray(waveform, dtype=np.float32)
-
-    def synthesize_with_kokoro(text: str, backend: dict[str, object], slow_audio: bool) -> np.ndarray:
-        pipeline = backend["pipeline"]
-        voice = backend["voice"]
-        assert isinstance(voice, str)
-
-        speed = SLOW_AUDIO_SPEED_MULTIPLIER if slow_audio else 1.0
-        pcm_chunks: list[np.ndarray] = []
-        for _, _, audio in pipeline(text, voice=voice, speed=speed):
-            pcm_chunks.append(np.asarray(audio, dtype=np.float32))
-
-        if not pcm_chunks:
-            raise RuntimeError("Kokoro returned no audio frames.")
-
-        return np.concatenate(pcm_chunks, axis=-1)
-
-    def synthesize_sentence(text: str, language_code: str, slow_audio: bool) -> tuple[np.ndarray, int]:
-        backend = ensure_backend(language_code)
-        sample_rate = backend["sample_rate"]
-        assert isinstance(sample_rate, int)
-
-        kind = backend["kind"]
-        assert isinstance(kind, str)
-        if kind == "kyutai":
-            pcm = synthesize_with_kyutai(text, backend)
-        elif kind == "mms":
-            pcm = synthesize_with_mms(text, backend)
-        elif kind == "kokoro":
-            pcm = synthesize_with_kokoro(text, backend, slow_audio=slow_audio)
-        else:
-            raise RuntimeError(f"Unsupported loaded backend kind: {kind}")
-
-        return pcm, sample_rate
-
     @web_app.on_event("startup")
     async def startup() -> None:
         os.environ.setdefault("HF_HOME", HF_CACHE_DIR)
@@ -347,6 +482,42 @@ def fastapi_app():
             },
         }
 
+    @web_app.post("/warmup")
+    async def warmup(
+        payload: dict[str, object] = Body(...),
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, object]:
+        expected_token = os.getenv("MODAL_TTS_AUTH_TOKEN", "").strip()
+        if expected_token and authorization != f"Bearer {expected_token}":
+            raise HTTPException(status_code=401, detail="Unauthorized.")
+
+        language_value = payload.get("language")
+        if not isinstance(language_value, str) or not language_value.strip():
+            raise HTTPException(status_code=422, detail="`language` must be a non-empty string.")
+        language_code = language_value.strip().casefold()
+
+        try:
+            _get_language_config(language_code)
+            warm_results = [
+                result
+                async for result in synthesize_sentence_group.map.aio(
+                    [[] for _ in range(AUDIO_PARALLEL_WORKERS)],
+                    [language_code] * AUDIO_PARALLEL_WORKERS,
+                    [False] * AUDIO_PARALLEL_WORKERS,
+                    kwargs={"warm_only": True},
+                )
+            ]
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=500, detail=f"TTS warmup failed: {exc}") from exc
+
+        warmed = dict(warm_results[0]) if warm_results else _build_worker_metadata(language_code)
+        warmed.pop("wav_bytes", None)
+        warmed["warmed_workers"] = len(warm_results)
+        warmed["status"] = "warmed"
+        return warmed
+
     @web_app.post("/synthesize-track")
     async def synthesize_track(
         payload: dict[str, object] = Body(...),
@@ -364,7 +535,10 @@ def fastapi_app():
         if not isinstance(language_value, str) or not language_value.strip():
             raise HTTPException(status_code=422, detail="`language` must be a non-empty string.")
         language_code = language_value.strip().casefold()
-        config = get_language_config(language_code)
+        try:
+            config = _get_language_config(language_code)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
         slow_audio_value = payload.get("slow_audio", False)
         if not isinstance(slow_audio_value, bool):
@@ -375,32 +549,17 @@ def fastapi_app():
             raise HTTPException(status_code=400, detail="At least one non-empty sentence is required.")
 
         try:
-            tracks: list[np.ndarray] = []
-            track_sample_rate: int | None = None
-
-            for index, sentence in enumerate(cleaned_sentences):
-                pcm, sample_rate = synthesize_sentence(
-                    sentence,
-                    language_code=language_code,
-                    slow_audio=slow_audio_value,
+            sentence_groups = _split_sentences_for_workers(cleaned_sentences, AUDIO_PARALLEL_WORKERS)
+            worker_results = [
+                result
+                async for result in synthesize_sentence_group.map.aio(
+                    sentence_groups,
+                    [language_code] * len(sentence_groups),
+                    [slow_audio_value] * len(sentence_groups),
+                    kwargs={"warm_only": False},
                 )
-                if track_sample_rate is None:
-                    track_sample_rate = sample_rate
-                elif track_sample_rate != sample_rate:
-                    raise RuntimeError(
-                        "TTS backend returned inconsistent sample rates across the same track."
-                    )
-
-                tracks.append(pcm)
-                if index < len(cleaned_sentences) - 1:
-                    pause = np.zeros(int(sample_rate * SENTENCE_PAUSE_SECONDS), dtype=np.float32)
-                    tracks.append(pause)
-
-            if track_sample_rate is None:
-                raise RuntimeError("No audio was produced.")
-
-            pcm = np.concatenate(tracks, axis=-1)
-            wav_bytes = _pcm_to_wav_bytes(pcm, track_sample_rate)
+            ]
+            wav_bytes = _assemble_parallel_wavs(worker_results)
             if slow_audio_value and config["backend"] != "kokoro":
                 wav_bytes = _apply_tempo_filter(wav_bytes, SLOW_AUDIO_SPEED_MULTIPLIER)
             audio_bytes = _encode_mp3_bytes(wav_bytes)

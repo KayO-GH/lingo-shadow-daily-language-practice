@@ -8,6 +8,9 @@ import pytest
 import study_pack
 
 from study_pack import (
+    DEFAULT_SENTENCE_COUNT,
+    MAX_SENTENCE_COUNT,
+    MIN_SENTENCE_COUNT,
     MODAL_TTS_MODEL,
     MODAL_TTS_VOICE,
     SENTENCES_PER_AUDIO_FILE,
@@ -26,6 +29,8 @@ from study_pack import (
     get_tts_backend_config,
     normalize_plan,
     translate_sentence_cards,
+    validate_sentence_count,
+    warmup_tts_backend,
 )
 
 
@@ -157,6 +162,57 @@ def test_modal_tts_client_posts_sentence_lists_and_slow_audio() -> None:
     assert captured["timeout"] == 45.0
 
 
+def test_modal_tts_client_posts_warmup_request() -> None:
+    captured: dict[str, object] = {}
+
+    def fake_json_transport(
+        url: str,
+        payload: bytes,
+        headers: dict[str, str],
+        timeout: float,
+    ) -> dict[str, object]:
+        captured["url"] = url
+        captured["payload"] = json.loads(payload.decode("utf-8"))
+        captured["headers"] = headers
+        captured["timeout"] = timeout
+        return {"status": "warmed", "language": "fr", "warmed_workers": 3}
+
+    client = ModalTTSClient(
+        base_url="https://tts.example.com",
+        auth_token="secret-token",
+        timeout_seconds=45.0,
+        json_transport=fake_json_transport,
+    )
+
+    response = client.warmup()
+
+    assert response == {"status": "warmed", "language": "fr", "warmed_workers": 3}
+    assert captured["url"] == "https://tts.example.com/warmup"
+    assert captured["payload"] == {"language": "fr"}
+    assert captured["headers"] == {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Authorization": "Bearer secret-token",
+    }
+    assert captured["timeout"] == 45.0
+
+
+def test_warmup_tts_backend_uses_modal_client(monkeypatch) -> None:
+    captured: list[str] = []
+
+    class StubClient:
+        def warmup(self) -> dict[str, object]:
+            captured.append("warmed")
+            return {"status": "warmed"}
+
+    monkeypatch.setattr(study_pack, "get_modal_tts_client", lambda target_language: StubClient())
+
+    response = warmup_tts_backend("French")
+
+    assert captured == ["warmed"]
+    assert response == {"status": "warmed"}
+
+
 def test_get_tts_backend_config_uses_language_specific_env(monkeypatch) -> None:
     monkeypatch.setenv("MODAL_TTS_BASE_URL_ES", "https://spanish-tts.example.com")
     monkeypatch.setenv("MODAL_TTS_AUTH_TOKEN_ES", "spanish-token")
@@ -184,6 +240,20 @@ def test_get_tts_backend_config_uses_historical_defaults() -> None:
     assert german_backend.voice_label == "checkpoint default"
     assert japanese_backend.model_label == "hexgrad/Kokoro-82M"
     assert japanese_backend.voice_label == "jf_alpha"
+
+
+def test_validate_sentence_count_accepts_values_within_new_range() -> None:
+    assert validate_sentence_count(DEFAULT_SENTENCE_COUNT) == DEFAULT_SENTENCE_COUNT
+    assert validate_sentence_count(MIN_SENTENCE_COUNT) == MIN_SENTENCE_COUNT
+    assert validate_sentence_count(MAX_SENTENCE_COUNT) == MAX_SENTENCE_COUNT
+
+
+def test_validate_sentence_count_rejects_values_outside_new_range() -> None:
+    with pytest.raises(ValueError, match=f"{MIN_SENTENCE_COUNT} and {MAX_SENTENCE_COUNT}"):
+        validate_sentence_count(MIN_SENTENCE_COUNT - 1)
+
+    with pytest.raises(ValueError, match=f"{MIN_SENTENCE_COUNT} and {MAX_SENTENCE_COUNT}"):
+        validate_sentence_count(MAX_SENTENCE_COUNT + 1)
 
 
 def test_default_tts_writer_converts_legacy_wav_responses_to_mp3(
@@ -404,7 +474,7 @@ def test_generate_sentence_cards_retries_until_requested_count(monkeypatch) -> N
                 "why_it_is_useful": "Top-up sentence.",
                 "pronunciation_hint": "",
             }
-            for index in range(1, 9)
+            for index in range(1, 11)
         ]
     }
 
@@ -434,6 +504,65 @@ def test_generate_sentence_cards_retries_until_requested_count(monkeypatch) -> N
     assert plan.cards[-1].target_sentence == "Top target 1"
 
 
+def test_generate_sentence_cards_keeps_small_usable_batches(monkeypatch) -> None:
+    def build_batch(prefix: str, count: int) -> dict[str, object]:
+        return {
+            "rationale": "Use daily situations.",
+            "assumptions": ["The learner wants practical phrases."],
+            "focus_verbs": ["work", "buy", "ask"],
+            "study_routine": [
+                {"title": "Preview", "minutes": 10, "instructions": "Scan verbs."},
+                {"title": "Listen", "minutes": 20, "instructions": "Shadow audio."},
+                {"title": "Speak", "minutes": 15, "instructions": "Recall from prompts."},
+            ],
+            "sentences": [
+                {
+                    "scenario": f"{prefix} scenario {index}",
+                    "source_sentence": f"{prefix} source {index}",
+                    "target_sentence": f"{prefix} target {index}",
+                    "verb_lemma": f"{prefix} verb {index}",
+                    "why_it_is_useful": "Useful daily sentence.",
+                    "pronunciation_hint": "",
+                }
+                for index in range(1, count + 1)
+            ],
+        }
+
+    batches = [
+        build_batch("first", 3),
+        build_batch("second", 4),
+        build_batch("third", 3),
+    ]
+
+    class StubClient:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def chat_completion(self, **_: object) -> SimpleNamespace:
+            payload = batches[self.calls]
+            self.calls += 1
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))]
+            )
+
+    client = StubClient()
+    monkeypatch.setattr(study_pack, "HF_GENERATION_MODEL", "Qwen/Qwen3-8B")
+    monkeypatch.setattr(study_pack, "translate_sentence_cards", lambda cards, **_: cards)
+
+    plan = generate_sentence_cards(
+        use_cases="I need French for errands and daily conversations.",
+        target_language=TARGET_LANGUAGE,
+        native_language="English",
+        sentence_count=10,
+        client=client,
+    )
+
+    assert client.calls == 3
+    assert len(plan.cards) == 10
+    assert plan.cards[0].target_sentence == "first target 1"
+    assert plan.cards[-1].target_sentence == "third target 3"
+
+
 def test_generate_sentence_cards_reads_text_from_content_blocks(monkeypatch) -> None:
     payload = {
         "rationale": "Use daily situations.",
@@ -453,7 +582,7 @@ def test_generate_sentence_cards_reads_text_from_content_blocks(monkeypatch) -> 
                 "why_it_is_useful": "Useful daily sentence.",
                 "pronunciation_hint": "",
             }
-            for index in range(1, 9)
+            for index in range(1, 11)
         ],
     }
 
@@ -475,11 +604,11 @@ def test_generate_sentence_cards_reads_text_from_content_blocks(monkeypatch) -> 
         use_cases="I need French for errands and daily conversations.",
         target_language=TARGET_LANGUAGE,
         native_language="English",
-        sentence_count=8,
+        sentence_count=10,
         client=StubClient(),
     )
 
-    assert len(plan.cards) == 8
+    assert len(plan.cards) == 10
     assert plan.cards[0].target_sentence == "Target 1"
 
 
@@ -502,7 +631,7 @@ def test_generate_sentence_cards_retries_after_empty_text_output(monkeypatch) ->
                 "why_it_is_useful": "Useful daily sentence.",
                 "pronunciation_hint": "",
             }
-            for index in range(1, 9)
+            for index in range(1, 11)
         ],
     }
 
@@ -524,12 +653,12 @@ def test_generate_sentence_cards_retries_after_empty_text_output(monkeypatch) ->
         use_cases="I need French for errands and daily conversations.",
         target_language=TARGET_LANGUAGE,
         native_language="English",
-        sentence_count=8,
+        sentence_count=10,
         client=client,
     )
 
     assert client.calls == 2
-    assert len(plan.cards) == 8
+    assert len(plan.cards) == 10
 
 
 def test_generate_sentence_cards_accepts_small_top_up_batch(monkeypatch) -> None:

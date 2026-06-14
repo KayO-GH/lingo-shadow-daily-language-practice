@@ -90,6 +90,7 @@ uv run python app.py
 The repo includes [`modal_tts_service.py`](/Users/Kwadwo/Documents/PROJECTS/HF-Build-Small/lingo-shadow-daily-language-practice/modal_tts_service.py), which serves one language-routed TTS API behind:
 
 - `GET /healthz`
+- `POST /warmup`
 - `POST /synthesize-track`
 
 Deploy it once and let it route by the request `language` code. A typical pattern is:

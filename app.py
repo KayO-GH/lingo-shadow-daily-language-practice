@@ -8,9 +8,12 @@ import os
 import gradio as gr
 
 from study_pack import (
+    DEFAULT_SENTENCE_COUNT,
     GeneratedStudyPlan,
     HF_GENERATION_MODEL,
     HF_GENERATION_PARAMS,
+    MAX_SENTENCE_COUNT,
+    MIN_SENTENCE_COUNT,
     SENTENCES_PER_AUDIO_FILE,
     TARGET_LANGUAGE,
     TRANSLATION_MODEL,
@@ -23,6 +26,8 @@ from study_pack import (
     get_supported_language_labels,
     get_tts_backend_config,
     load_environment,
+    validate_sentence_count,
+    warmup_tts_backend,
 )
 
 APP_TITLE = "LingoShadow - Daily Language Practice"
@@ -694,6 +699,13 @@ def build_error_state(message: str):
     )
 
 
+def warmup_selected_language(target_language: str) -> None:
+    try:
+        warmup_tts_backend(target_language)
+    except Exception:  # noqa: BLE001
+        logger.warning("TTS warmup failed for %s", target_language, exc_info=True)
+
+
 def run_pack_builder(
     use_cases: str,
     target_language: str,
@@ -708,6 +720,7 @@ def run_pack_builder(
         )
 
     try:
+        sentence_count = validate_sentence_count(sentence_count)
         plan: GeneratedStudyPlan = generate_sentence_cards(
             use_cases=cleaned_use_cases,
             target_language=target_language,
@@ -830,9 +843,9 @@ def build_app() -> gr.Blocks:
                             info="Translations and explanations are grounded in this language.",
                         )
                         sentence_count = gr.Slider(
-                            minimum=20,
-                            maximum=100,
-                            value=20,
+                            minimum=MIN_SENTENCE_COUNT,
+                            maximum=MAX_SENTENCE_COUNT,
+                            value=DEFAULT_SENTENCE_COUNT,
                             step=1,
                             label="Sentence count",
                             info=f"Audio is grouped into MP3 files of up to {SENTENCES_PER_AUDIO_FILE} sentences each.",
@@ -957,6 +970,21 @@ def build_app() -> gr.Blocks:
                 fn=build_model_stack_md,
                 inputs=[target_language],
                 outputs=[model_stack_output],
+            )
+            target_language.change(
+                fn=warmup_selected_language,
+                inputs=[target_language],
+                outputs=None,
+                queue=False,
+                show_progress="hidden",
+            )
+
+            demo.load(
+                fn=warmup_selected_language,
+                inputs=[target_language],
+                outputs=None,
+                queue=False,
+                show_progress="hidden",
             )
 
             build_button.click(

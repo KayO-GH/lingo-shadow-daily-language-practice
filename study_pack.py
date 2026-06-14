@@ -30,6 +30,9 @@ DEFAULT_FALLBACK_ENV_PATH = Path("/Users/Kwadwo/Documents/PROJECTS/NITA-bill-rev
 OUTPUT_ROOT = Path(tempfile.gettempdir()) / "daily_language_practice"
 SENTENCES_PER_AUDIO_FILE = 20
 TARGET_LANGUAGE = "French"
+MIN_SENTENCE_COUNT = 10
+MAX_SENTENCE_COUNT = 50
+DEFAULT_SENTENCE_COUNT = 10
 NATIVE_LANGUAGE_CHOICES = ["English", "French", "Spanish", "German", "Portuguese", "Italian", "Japanese"]
 
 GENERATION_MODEL_OPTIONS = {
@@ -69,6 +72,7 @@ DEFAULT_MACOS_SPEECH_RATE = 180
 SLOW_AUDIO_SPEED_MULTIPLIER = 0.9
 HF_GENERATION_ATTEMPTS_PER_BATCH = 3
 TRANSLATION_ATTEMPTS_PER_BATCH = 3
+MIN_USABLE_GENERATION_SENTENCES = 1
 
 SUPPORTED_LANGUAGES: dict[str, dict[str, object]] = {
     "English": {
@@ -250,6 +254,7 @@ class ModalTTSClient:
     auth_token: str
     timeout_seconds: float = MODAL_TTS_TIMEOUT_SECONDS
     transport: Callable[[str, bytes, dict[str, str], float], bytes] | None = None
+    json_transport: Callable[[str, bytes, dict[str, str], float], dict[str, Any]] | None = None
     language_code: str = "fr"
     model_label: str = MODAL_TTS_MODEL
     voice_label: str = MODAL_TTS_VOICE
@@ -284,6 +289,30 @@ class ModalTTSClient:
         transport = self.transport or _default_modal_tts_transport
         return transport(
             self.base_url.rstrip("/") + "/synthesize-track",
+            payload,
+            headers,
+            self.timeout_seconds,
+        )
+
+    def warmup(self) -> dict[str, Any]:
+        if not self.base_url.strip():
+            raise RuntimeError(
+                f"Missing Modal TTS base URL for {self.language_label}. "
+                f"Set MODAL_TTS_BASE_URL_{get_tts_code(self.language_label).upper()} "
+                "or the legacy MODAL_TTS_BASE_URL."
+            )
+
+        payload = json.dumps({"language": self.language_code}).encode("utf-8")
+        headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
+        if self.auth_token:
+            headers["Authorization"] = f"Bearer {self.auth_token}"
+
+        transport = self.json_transport or _default_modal_tts_json_transport
+        return transport(
+            self.base_url.rstrip("/") + "/warmup",
             payload,
             headers,
             self.timeout_seconds,
@@ -375,6 +404,22 @@ def load_environment() -> Path | None:
     return None
 
 
+def validate_sentence_count(sentence_count: Any) -> int:
+    try:
+        normalized = int(sentence_count)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"Sentence count must be an integer between {MIN_SENTENCE_COUNT} and {MAX_SENTENCE_COUNT}."
+        ) from exc
+
+    if normalized < MIN_SENTENCE_COUNT or normalized > MAX_SENTENCE_COUNT:
+        raise ValueError(
+            f"Sentence count must be between {MIN_SENTENCE_COUNT} and {MAX_SENTENCE_COUNT}."
+        )
+
+    return normalized
+
+
 def get_supported_language_labels() -> list[str]:
     return list(SUPPORTED_LANGUAGES)
 
@@ -390,6 +435,7 @@ def get_tts_code(language_name: str) -> str:
 def get_modal_tts_client(
     target_language: str,
     transport: Callable[[str, bytes, dict[str, str], float], bytes] | None = None,
+    json_transport: Callable[[str, bytes, dict[str, str], float], dict[str, Any]] | None = None,
 ) -> ModalTTSClient:
     load_environment()
     backend = get_tts_backend_config(target_language)
@@ -407,6 +453,7 @@ def get_modal_tts_client(
         auth_token=backend.auth_token,
         timeout_seconds=timeout_seconds,
         transport=transport,
+        json_transport=json_transport,
         language_code=backend.language_code,
         model_label=backend.model_label,
         voice_label=backend.voice_label,
@@ -445,6 +492,10 @@ Return a JSON object with these keys:
 - focus_verbs: array of 8 to 15 verb lemmas ordered by importance
 - study_routine: array of exactly 3 objects that total 45 minutes
 - sentences: array of exactly {sentence_count} objects
+
+Before returning, count the sentences array and make sure it contains exactly {sentence_count} objects.
+If the learner's prompt is brief, still produce {sentence_count} distinct practical sentences by varying the
+daily situations, actions, and verbs while staying grounded in the prompt.
 
 Each study_routine object must include:
 - title
@@ -855,6 +906,39 @@ def _default_modal_tts_transport(url: str, payload: bytes, headers: dict[str, st
     return body
 
 
+def _default_modal_tts_json_transport(
+    url: str,
+    payload: bytes,
+    headers: dict[str, str],
+    timeout: float,
+) -> dict[str, Any]:
+    request = urllib.request.Request(url=url, data=payload, headers=headers, method="POST")
+
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            body = response.read()
+            content_type = response.headers.get("Content-Type", "")
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace").strip()
+        message = detail or exc.reason or "unknown error"
+        raise RuntimeError(f"Modal TTS request failed with HTTP {exc.code}: {message}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Modal TTS request failed: {exc.reason}") from exc
+
+    if "application/json" not in content_type:
+        raise RuntimeError(f"Modal TTS returned unexpected content type: {content_type or 'missing'}")
+
+    try:
+        return json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("Modal TTS returned malformed JSON.") from exc
+
+
+def warmup_tts_backend(target_language: str) -> dict[str, Any]:
+    tts_client = get_modal_tts_client(target_language)
+    return tts_client.warmup()
+
+
 def _looks_like_wav_bytes(audio_bytes: bytes) -> bool:
     return len(audio_bytes) >= 12 and audio_bytes[:4] == b"RIFF" and audio_bytes[8:12] == b"WAVE"
 
@@ -1086,6 +1170,7 @@ def generate_sentence_cards(
     client: InferenceClient | None = None,
 ) -> GeneratedStudyPlan:
     ensure_supported_target_language(target_language)
+    sentence_count = validate_sentence_count(sentence_count)
     load_environment()
     api_key = os.getenv("HF_TOKEN", "").strip()
     if not api_key and client is None:
@@ -1111,7 +1196,7 @@ def generate_sentence_cards(
             break
 
         requested_count = min(batch_size_limit, max(remaining, 8))
-        minimum_usable_sentences = min(remaining, max(4, min(8, requested_count // 2)))
+        minimum_usable_sentences = min(remaining, MIN_USABLE_GENERATION_SENTENCES)
         try:
             batch_plan = _request_generation_plan(
                 client=client,

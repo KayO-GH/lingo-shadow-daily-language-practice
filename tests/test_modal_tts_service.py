@@ -80,7 +80,7 @@ def test_modal_tts_service_imports_without_kokoro_installed(monkeypatch) -> None
     module = _load_module(monkeypatch)
 
     assert "KPipeline" not in module.__dict__
-    assert "from kokoro import KPipeline" in inspect.getsource(module.fastapi_app)
+    assert "from kokoro import KPipeline" in inspect.getsource(module._load_kokoro_backend)
 
 
 def test_modal_tts_service_image_installs_kokoro_runtime_requirements(monkeypatch) -> None:
@@ -111,3 +111,31 @@ def test_modal_tts_service_emits_mp3_audio(monkeypatch) -> None:
     module = _load_module(monkeypatch)
 
     assert 'media_type="audio/mpeg"' in inspect.getsource(module.fastapi_app)
+
+
+def test_modal_tts_service_exposes_warmup_endpoint(monkeypatch) -> None:
+    module = _load_module(monkeypatch)
+
+    assert '@web_app.post("/warmup")' in inspect.getsource(module.fastapi_app)
+
+
+def test_modal_tts_service_limits_parallel_workers_to_three(monkeypatch) -> None:
+    module = _load_module(monkeypatch)
+
+    assert module.AUDIO_PARALLEL_WORKERS == 3
+    assert module.WORKER_FUNCTION_KWARGS["max_containers"] == 3
+
+
+def test_modal_tts_service_splits_sentences_into_three_contiguous_groups(monkeypatch) -> None:
+    module = _load_module(monkeypatch)
+
+    groups = module._split_sentences_for_workers(
+        [f"Sentence {index}" for index in range(1, 11)],
+        worker_count=3,
+    )
+
+    assert groups == [
+        ["Sentence 1", "Sentence 2", "Sentence 3", "Sentence 4"],
+        ["Sentence 5", "Sentence 6", "Sentence 7"],
+        ["Sentence 8", "Sentence 9", "Sentence 10"],
+    ]
