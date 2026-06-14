@@ -327,6 +327,10 @@ def ensure_supported_target_language(language_name: str) -> None:
         )
 
 
+def build_artifact_timestamp() -> str:
+    return datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+
+
 def get_language_config(language_name: str) -> dict[str, object]:
     ensure_supported_target_language(language_name)
     return SUPPORTED_LANGUAGES[language_name]
@@ -1324,7 +1328,8 @@ def create_study_pack(
     get_tts_code(target_language)
     writer = tts_writer or default_tts_writer
     base_dir = output_root or OUTPUT_ROOT
-    session_dir = base_dir / f"{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:8]}"
+    artifact_timestamp = build_artifact_timestamp()
+    session_dir = base_dir / f"{artifact_timestamp}_{uuid4().hex[:8]}"
     session_dir.mkdir(parents=True, exist_ok=True)
 
     audio_paths: list[Path] = []
@@ -1333,7 +1338,7 @@ def create_study_pack(
         start_number = ((batch_index - 1) * SENTENCES_PER_AUDIO_FILE) + 1
         end_number = start_number + len(card_batch) - 1
         filename = (
-            f"{batch_index:02d}_sentences_{start_number:02d}_{end_number:02d}{AUDIO_FILE_EXTENSION}"
+            f"{batch_index:02d}_sentences_{start_number:02d}_{end_number:02d}_{artifact_timestamp}{AUDIO_FILE_EXTENSION}"
         )
         audio_path = session_dir / filename
         track_sentences = [card.target_sentence for card in card_batch]
@@ -1416,7 +1421,7 @@ def create_study_pack(
         encoding="utf-8",
     )
 
-    zip_path = session_dir / "daily_language_pack.zip"
+    zip_path = session_dir / f"daily_language_pack_{artifact_timestamp}.zip"
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for item in sorted(session_dir.iterdir()):
             if item == zip_path:

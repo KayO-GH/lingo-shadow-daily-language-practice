@@ -287,7 +287,9 @@ def test_default_tts_writer_converts_legacy_wav_responses_to_mp3(
     assert backend_label == f"Modal ({client.model_label})"
 
 
-def test_create_study_pack_writes_bundle_and_zip(tmp_path: Path) -> None:
+def test_create_study_pack_writes_bundle_and_zip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(study_pack, "build_artifact_timestamp", lambda: "20260614_213000")
+
     cards = [
         SentenceCard(
             scenario="Groceries",
@@ -333,7 +335,9 @@ def test_create_study_pack_writes_bundle_and_zip(tmp_path: Path) -> None:
 
     assert bundle.preview_audio_path.exists()
     assert bundle.preview_audio_path.suffix == ".mp3"
+    assert bundle.preview_audio_path.name == "01_sentences_01_02_20260614_213000.mp3"
     assert bundle.zip_path.exists()
+    assert bundle.zip_path.name == "daily_language_pack_20260614_213000.zip"
     assert len(bundle.audio_paths) == 1
     assert (bundle.session_dir / "study_pack.csv").exists()
     assert (bundle.session_dir / "study_pack.json").exists()
@@ -348,7 +352,9 @@ def test_create_study_pack_writes_bundle_and_zip(tmp_path: Path) -> None:
     assert MODAL_TTS_VOICE in summary_text
 
 
-def test_create_study_pack_batches_every_twenty_sentences(tmp_path: Path) -> None:
+def test_create_study_pack_batches_every_twenty_sentences(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(study_pack, "build_artifact_timestamp", lambda: "20260614_213500")
+
     cards = [
         SentenceCard(
             scenario=f"Scenario {index}",
@@ -379,8 +385,9 @@ def test_create_study_pack_batches_every_twenty_sentences(tmp_path: Path) -> Non
     )
 
     assert len(bundle.audio_paths) == 2
-    assert bundle.audio_paths[0].name == "01_sentences_01_20.mp3"
-    assert bundle.audio_paths[1].name == "02_sentences_21_21.mp3"
+    assert bundle.audio_paths[0].name == "01_sentences_01_20_20260614_213500.mp3"
+    assert bundle.audio_paths[1].name == "02_sentences_21_21_20260614_213500.mp3"
+    assert bundle.zip_path.name == "daily_language_pack_20260614_213500.zip"
     assert len(calls[0][0]) == SENTENCES_PER_AUDIO_FILE
     assert calls[0][1] == TARGET_LANGUAGE
     assert calls[1] == (["Target sentence 21"], TARGET_LANGUAGE)
