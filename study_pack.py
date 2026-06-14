@@ -31,7 +31,7 @@ OUTPUT_ROOT = Path(tempfile.gettempdir()) / "daily_language_practice"
 SENTENCES_PER_AUDIO_FILE = 20
 TARGET_LANGUAGE = "French"
 MIN_SENTENCE_COUNT = 10
-MAX_SENTENCE_COUNT = 50
+MAX_SENTENCE_COUNT = 40
 DEFAULT_SENTENCE_COUNT = 10
 NATIVE_LANGUAGE_CHOICES = ["English", "French", "Spanish", "German", "Portuguese", "Italian", "Japanese"]
 
