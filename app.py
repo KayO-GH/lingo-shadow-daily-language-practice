@@ -757,11 +757,12 @@ def build_highlights_html() -> str:
     """.strip()
 
 
-def build_panel_heading_html(title: str, description: str) -> str:
+def build_panel_heading_html(title: str, description: str|None = None) -> str:
+    description_html = f"<p>{description}</p>" if description else ""
     return f"""
     <div class="panel-heading">
         <strong>{title}</strong>
-        <p>{description}</p>
+        {description_html}
     </div>
     """.strip()
 
@@ -1055,30 +1056,74 @@ def build_app() -> gr.Blocks:
                         )
 
             with gr.Column(elem_id="results-shell"):
+                with gr.Column(elem_classes="status-panel"):
+                    gr.HTML(
+                        build_panel_heading_html(
+                            "Build status",
+                        )
+                    )
+                    status_output = gr.Markdown(
+                        "Build a pack to see generation status, file counts, and stack details.",
+                        label="Status",
+                        elem_id="status-output",
+                    )
                 gr.Markdown(
                     """
                     <div id="results-summary">
                         <strong>Study pack workspace</strong>
-                        <p>Generate once, then switch between overview, sentence review, and audio downloads without dragging through empty panels.</p>
+                        <p>Generate once, then switch between the study pack and pack details without dragging through empty panels.</p>
                     </div>
                     """.strip()
                 )
                 with gr.Column(elem_id="results-tabs-shell"):
                     with gr.Tabs():
-                        with gr.Tab("Overview"):
+                        with gr.Tab("Study Pack"):
+                            with gr.Column(elem_id="table-shell"):
+                                gr.HTML(
+                                    build_panel_heading_html(
+                                        "Generated sentence pack",
+                                        "Scan the scenarios, compare source and target phrasing, and isolate the verbs worth drilling.",
+                                    )
+                                )
+                                table_output = gr.Dataframe(
+                                    headers=[
+                                        "Scenario",
+                                        "Source sentence",
+                                        "Target sentence",
+                                        "Verb",
+                                    ],
+                                    datatype=["str", "str", "str", "str"],
+                                    row_count=8,
+                                    column_count=4,
+                                    interactive=False,
+                                    wrap=False,
+                                    label="Generated sentence pack",
+                                )
+
                             with gr.Row():
-                                with gr.Column(scale=2, elem_classes="status-panel"):
+                                with gr.Column(scale=2, elem_id="audio-shell"):
                                     gr.HTML(
                                         build_panel_heading_html(
-                                            "Build status",
-                                            "See whether the current pack completed and what assets were generated.",
+                                            "Preview audio",
+                                            "Listen to the first generated track before downloading the full bundle.",
                                         )
                                     )
-                                    status_output = gr.Markdown(
-                                        "Build a pack to see generation status, file counts, and stack details.",
-                                        label="Status",
-                                        elem_id="status-output",
+                                    preview_audio = gr.Audio(
+                                        label="Preview the first generated audio track",
+                                        elem_id="preview-audio",
                                     )
+                                with gr.Column(scale=1, elem_id="downloads-shell"):
+                                    gr.HTML(
+                                        build_panel_heading_html(
+                                            "Downloads",
+                                            "Grab the ZIP bundle or use the individual MP3 files directly.",
+                                        )
+                                    )
+                                    zip_output = gr.File(label="Download the full study pack ZIP")
+                                    audio_files = gr.File(label="Generated audio tracks", file_count="multiple")
+
+                        with gr.Tab("Pack Details"):
+                            with gr.Row():
                                 with gr.Column(scale=1, elem_classes="status-panel"):
                                     gr.HTML(
                                         build_panel_heading_html(
@@ -1117,52 +1162,6 @@ def build_app() -> gr.Blocks:
                                         label="Assumptions",
                                         elem_id="assumptions-output",
                                     )
-
-                        with gr.Tab("Sentence pack"):
-                            with gr.Column(elem_id="table-shell"):
-                                gr.HTML(
-                                    build_panel_heading_html(
-                                        "Generated sentence pack",
-                                        "Scan the scenarios, compare source and target phrasing, and isolate the verbs worth drilling.",
-                                    )
-                                )
-                                table_output = gr.Dataframe(
-                                    headers=[
-                                        "Scenario",
-                                        "Source sentence",
-                                        "Target sentence",
-                                        "Verb",
-                                    ],
-                                    datatype=["str", "str", "str", "str"],
-                                    row_count=8,
-                                    column_count=4,
-                                    interactive=False,
-                                    wrap=False,
-                                    label="Generated sentence pack",
-                                )
-
-                        with gr.Tab("Audio kit"):
-                            with gr.Row():
-                                with gr.Column(scale=2, elem_id="audio-shell"):
-                                    gr.HTML(
-                                        build_panel_heading_html(
-                                            "Preview audio",
-                                            "Listen to the first generated track before downloading the full bundle.",
-                                        )
-                                    )
-                                    preview_audio = gr.Audio(
-                                        label="Preview the first generated audio track",
-                                        elem_id="preview-audio",
-                                    )
-                                with gr.Column(scale=1, elem_id="downloads-shell"):
-                                    gr.HTML(
-                                        build_panel_heading_html(
-                                            "Downloads",
-                                            "Grab the ZIP bundle or use the individual MP3 files directly.",
-                                        )
-                                    )
-                                    zip_output = gr.File(label="Download the full study pack ZIP")
-                                    audio_files = gr.File(label="Generated audio tracks", file_count="multiple")
 
 
             target_language.change(
