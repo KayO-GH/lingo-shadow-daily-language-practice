@@ -178,6 +178,53 @@ body {
     color: #0f172a !important;
     font-weight: 700;
 }
+.hero-action-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: center;
+    margin: 0.2rem 0 0.8rem 0;
+}
+#motivation-button button,
+#motivation-button .gradio-button {
+    border-radius: 999px !important;
+    border: 1px solid rgba(124, 45, 18, 0.14) !important;
+    background: rgba(255, 255, 255, 0.82) !important;
+    color: #7c2d12 !important;
+    box-shadow: 0 12px 24px rgba(124, 45, 18, 0.08);
+}
+#motivation-button button:hover,
+#motivation-button .gradio-button:hover {
+    background: rgba(255, 247, 237, 0.96) !important;
+    border-color: rgba(249, 115, 22, 0.24) !important;
+}
+#motivation-panel {
+    margin: 0 0 1rem 0;
+}
+.motivation-panel {
+    border-radius: 22px;
+    border: 1px solid rgba(249, 115, 22, 0.16);
+    background: linear-gradient(135deg, rgba(255, 247, 237, 0.98) 0%, rgba(240, 249, 255, 0.96) 100%);
+    box-shadow: 0 16px 30px rgba(15, 23, 42, 0.06);
+    padding: 1rem 1.05rem;
+}
+.motivation-panel h3 {
+    margin: 0 0 0.35rem 0;
+    color: #7c2d12 !important;
+    font-size: 1.02rem;
+}
+.motivation-panel p,
+.motivation-panel li {
+    color: #7c2d12 !important;
+}
+.motivation-panel ul {
+    margin: 0.6rem 0 0.8rem 1.1rem;
+    padding: 0;
+}
+.motivation-panel a {
+    color: #0f766e !important;
+    font-weight: 700;
+}
 .hero-sidecard {
     position: relative;
     overflow: hidden;
@@ -707,6 +754,21 @@ def build_hero_chips_html() -> str:
     """.strip()
 
 
+def build_motivation_html() -> str:
+    return """
+    <div class="motivation-panel">
+        <h3>Language shadowing is how kids learn naturally</h3>
+        <p>The idea is simple:</p>
+        <ul>
+            <li>Practice useful phrases from your real routines instead of generic textbook filler.</li>
+            <li>Study with sentences, audio, and repetition so words stay attached to context. (Grammar comes implicitly)</li>
+            <li>Keep the loop small enough to repeat daily: build, listen, shadow, and review.</li>
+        </ul>
+        <p><a href="https://www.youtube.com/watch?v=zas7awYWp2k" target="_blank" rel="noopener noreferrer">Watch this explainer by Mikel, a 12-language polyglot</a></p>
+    </div>
+    """.strip()
+
+
 def build_hero_sidecard_html() -> str:
     return """
     <div class="hero-sidecard">
@@ -777,6 +839,12 @@ def build_model_stack_md(target_language: str) -> str:
         f"- Total: **~{total_params:,}** params\n"
         f"- Stack summary: `{get_model_stack_summary(target_language)}`"
     )
+
+
+def toggle_motivation_panel(is_visible: bool):
+    next_visible = not is_visible
+    button_label = "Hide project motivation" if next_visible else "Why this project?"
+    return gr.update(visible=next_visible), next_visible, gr.update(value=button_label)
 
 
 def resolve_server_port() -> int | None:
@@ -994,6 +1062,15 @@ def build_app() -> gr.Blocks:
                     gr.Markdown(f"# {APP_TITLE}")
                     gr.Markdown(APP_DESCRIPTION)
                     gr.HTML(build_hero_chips_html())
+                    motivation_open = gr.State(False)
+                    with gr.Row(elem_classes="hero-action-row"):
+                        motivation_button = gr.Button(
+                            "Why this strategy works...",
+                            variant="secondary",
+                            elem_id="motivation-button",
+                        )
+                    with gr.Column(visible=False, elem_id="motivation-panel") as motivation_panel:
+                        gr.HTML(build_motivation_html())
                     with gr.Accordion("Model stack", open=False):
                         model_stack_output = gr.Markdown(build_model_stack_md(TARGET_LANGUAGE))
 
@@ -1168,6 +1245,11 @@ def build_app() -> gr.Blocks:
                 fn=build_model_stack_md,
                 inputs=[target_language],
                 outputs=[model_stack_output],
+            )
+            motivation_button.click(
+                fn=toggle_motivation_panel,
+                inputs=[motivation_open],
+                outputs=[motivation_panel, motivation_open, motivation_button],
             )
             target_language.change(
                 fn=warmup_selected_language,
