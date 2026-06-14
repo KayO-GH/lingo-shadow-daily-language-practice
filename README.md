@@ -34,7 +34,7 @@ This keeps the default app stack comfortably inside the Build Small hackathon `<
 - returns a simple 45-minute daily study routine
 - highlights the core verbs the learner should review first
 - generates downloadable target-language audio tracks through a dedicated Modal-backed TTS service
-- groups audio into files of up to `20` sentences per WAV track plus a downloadable ZIP bundle
+- groups audio into files of up to `20` sentences per MP3 track plus a downloadable ZIP bundle
 
 ## Supported languages
 
@@ -115,12 +115,12 @@ The request body for `POST /synthesize-track` is:
 }
 ```
 
-The response is raw `audio/wav` bytes for the concatenated track.
+The response is raw `audio/mpeg` bytes for the concatenated track.
 
 ## Notes
 
-- The generated ZIP includes JSON, CSV, a text summary, a daily routine file, a focus-verbs file, and the WAV tracks.
-- Preview audio uses the first generated WAV track.
+- The generated ZIP includes JSON, CSV, a text summary, a daily routine file, a focus-verbs file, and the MP3 tracks.
+- Preview audio uses the first generated MP3 track.
 - If `HF_TOKEN` is unavailable, generation fails with a clear setup message.
 - If a language-specific Modal TTS endpoint is unavailable or misconfigured, the app fails with a clear Gradio error instead of silently switching languages.
 - On macOS, the app can still fall back to a matching local `say` voice when a Modal request fails and a compatible system voice is installed for that target language.

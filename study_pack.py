@@ -63,6 +63,8 @@ MMS_TTS_PARAMS = 36_285_936
 MODAL_TTS_TIMEOUT_SECONDS = 120.0
 UNCONFIGURED_TTS_MODEL_LABEL = "configured per-language Modal TTS"
 AUDIO_SENTENCE_PAUSE_SECONDS = 2.0
+AUDIO_FILE_EXTENSION = ".mp3"
+MP3_MIME_TYPE = "audio/mpeg"
 DEFAULT_MACOS_SPEECH_RATE = 180
 SLOW_AUDIO_SPEED_MULTIPLIER = 0.9
 HF_GENERATION_ATTEMPTS_PER_BATCH = 3
@@ -273,7 +275,7 @@ class ModalTTSClient:
             }
         ).encode("utf-8")
         headers = {
-            "Accept": "audio/wav",
+            "Accept": MP3_MIME_TYPE,
             "Content-Type": "application/json",
         }
         if self.auth_token:
@@ -843,10 +845,49 @@ def _default_modal_tts_transport(url: str, payload: bytes, headers: dict[str, st
     except urllib.error.URLError as exc:
         raise RuntimeError(f"Modal TTS request failed: {exc.reason}") from exc
 
-    if "audio/wav" not in content_type and "application/octet-stream" not in content_type:
+    if (
+        MP3_MIME_TYPE not in content_type
+        and "audio/wav" not in content_type
+        and "application/octet-stream" not in content_type
+    ):
         raise RuntimeError(f"Modal TTS returned unexpected content type: {content_type or 'missing'}")
 
     return body
+
+
+def _looks_like_wav_bytes(audio_bytes: bytes) -> bool:
+    return len(audio_bytes) >= 12 and audio_bytes[:4] == b"RIFF" and audio_bytes[8:12] == b"WAVE"
+
+
+def _convert_wav_bytes_to_mp3(wav_bytes: bytes) -> bytes:
+    ffmpeg_binary = shutil.which("ffmpeg")
+    if not ffmpeg_binary:
+        raise RuntimeError(
+            "Received WAV audio from the TTS service but ffmpeg is unavailable to convert it to MP3. "
+            "Redeploy the Modal TTS service with the MP3 update or install ffmpeg locally."
+        )
+
+    result = subprocess.run(
+        [
+            ffmpeg_binary,
+            "-loglevel",
+            "error",
+            "-i",
+            "pipe:0",
+            "-codec:a",
+            "libmp3lame",
+            "-b:a",
+            "128k",
+            "-f",
+            "mp3",
+            "pipe:1",
+        ],
+        input=wav_bytes,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    return result.stdout
 
 
 def _resolve_macos_voice(target_language: str) -> str | None:
@@ -877,7 +918,7 @@ def _resolve_macos_voice(target_language: str) -> str | None:
     return None
 
 
-def _write_macos_fallback_wav(
+def _write_macos_fallback_mp3(
     sentences: list[str],
     destination: Path,
     slow_audio: bool,
@@ -910,7 +951,7 @@ def _write_macos_fallback_wav(
             check=True,
         )
         subprocess.run(
-            [afconvert_binary, "-f", "WAVE", "-d", "LEI16", str(temp_aiff), str(destination)],
+            [afconvert_binary, "-f", "MPG3", "-d", ".mp3", str(temp_aiff), str(destination)],
             check=True,
         )
 
@@ -1162,13 +1203,15 @@ def default_tts_writer(
         fallback_voice = _resolve_macos_voice(target_language)
         if not fallback_voice:
             raise
-        return _write_macos_fallback_wav(
+        return _write_macos_fallback_mp3(
             sentences,
             destination,
             slow_audio,
             target_language=target_language,
         )
 
+    if _looks_like_wav_bytes(audio_bytes):
+        audio_bytes = _convert_wav_bytes_to_mp3(audio_bytes)
     destination.write_bytes(audio_bytes)
     return f"Modal ({tts_client.model_label})"
 
@@ -1204,7 +1247,9 @@ def create_study_pack(
     for batch_index, card_batch in enumerate(chunk_cards(cards), start=1):
         start_number = ((batch_index - 1) * SENTENCES_PER_AUDIO_FILE) + 1
         end_number = start_number + len(card_batch) - 1
-        filename = f"{batch_index:02d}_sentences_{start_number:02d}_{end_number:02d}.wav"
+        filename = (
+            f"{batch_index:02d}_sentences_{start_number:02d}_{end_number:02d}{AUDIO_FILE_EXTENSION}"
+        )
         audio_path = session_dir / filename
         track_sentences = [card.target_sentence for card in card_batch]
         backend_label = writer(track_sentences, audio_path, slow_audio, target_language)

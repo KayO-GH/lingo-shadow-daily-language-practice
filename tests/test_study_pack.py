@@ -132,7 +132,7 @@ def test_modal_tts_client_posts_sentence_lists_and_slow_audio() -> None:
         captured["payload"] = json.loads(payload.decode("utf-8"))
         captured["headers"] = headers
         captured["timeout"] = timeout
-        return b"RIFFfakewav"
+        return b"ID3fake-mp3"
 
     client = ModalTTSClient(
         base_url="https://tts.example.com",
@@ -142,7 +142,7 @@ def test_modal_tts_client_posts_sentence_lists_and_slow_audio() -> None:
     )
     audio = client.synthesize_track(["Bonjour.", "Comment allez-vous ?"], slow_audio=True)
 
-    assert audio == b"RIFFfakewav"
+    assert audio == b"ID3fake-mp3"
     assert captured["url"] == "https://tts.example.com/synthesize-track"
     assert captured["payload"] == {
         "sentences": ["Bonjour.", "Comment allez-vous ?"],
@@ -150,7 +150,7 @@ def test_modal_tts_client_posts_sentence_lists_and_slow_audio() -> None:
         "slow_audio": True,
     }
     assert captured["headers"] == {
-        "Accept": "audio/wav",
+        "Accept": "audio/mpeg",
         "Content-Type": "application/json",
         "Authorization": "Bearer secret-token",
     }
@@ -184,6 +184,37 @@ def test_get_tts_backend_config_uses_historical_defaults() -> None:
     assert german_backend.voice_label == "checkpoint default"
     assert japanese_backend.model_label == "hexgrad/Kokoro-82M"
     assert japanese_backend.voice_label == "jf_alpha"
+
+
+def test_default_tts_writer_converts_legacy_wav_responses_to_mp3(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    converted_inputs: list[bytes] = []
+
+    def fake_convert(wav_bytes: bytes) -> bytes:
+        converted_inputs.append(wav_bytes)
+        return b"ID3converted-mp3"
+
+    monkeypatch.setattr(study_pack, "_convert_wav_bytes_to_mp3", fake_convert)
+
+    client = ModalTTSClient(
+        base_url="https://tts.example.com",
+        auth_token="",
+        transport=lambda *_args: b"RIFF\x00\x00\x00\x00WAVElegacy",
+    )
+    destination = tmp_path / "legacy.mp3"
+
+    backend_label = study_pack.default_tts_writer(
+        ["Bonjour."],
+        destination,
+        slow_audio=False,
+        target_language=TARGET_LANGUAGE,
+        client=client,
+    )
+
+    assert converted_inputs == [b"RIFF\x00\x00\x00\x00WAVElegacy"]
+    assert destination.read_bytes() == b"ID3converted-mp3"
+    assert backend_label == f"Modal ({client.model_label})"
 
 
 def test_create_study_pack_writes_bundle_and_zip(tmp_path: Path) -> None:
@@ -231,7 +262,7 @@ def test_create_study_pack_writes_bundle_and_zip(tmp_path: Path) -> None:
     )
 
     assert bundle.preview_audio_path.exists()
-    assert bundle.preview_audio_path.suffix == ".wav"
+    assert bundle.preview_audio_path.suffix == ".mp3"
     assert bundle.zip_path.exists()
     assert len(bundle.audio_paths) == 1
     assert (bundle.session_dir / "study_pack.csv").exists()
@@ -278,8 +309,8 @@ def test_create_study_pack_batches_every_twenty_sentences(tmp_path: Path) -> Non
     )
 
     assert len(bundle.audio_paths) == 2
-    assert bundle.audio_paths[0].name == "01_sentences_01_20.wav"
-    assert bundle.audio_paths[1].name == "02_sentences_21_21.wav"
+    assert bundle.audio_paths[0].name == "01_sentences_01_20.mp3"
+    assert bundle.audio_paths[1].name == "02_sentences_21_21.mp3"
     assert len(calls[0][0]) == SENTENCES_PER_AUDIO_FILE
     assert calls[0][1] == TARGET_LANGUAGE
     assert calls[1] == (["Target sentence 21"], TARGET_LANGUAGE)

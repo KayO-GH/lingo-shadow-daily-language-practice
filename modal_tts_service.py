@@ -142,6 +142,30 @@ def _apply_tempo_filter(wav_bytes: bytes, speed_multiplier: float) -> bytes:
     return result.stdout
 
 
+def _encode_mp3_bytes(wav_bytes: bytes) -> bytes:
+    result = subprocess.run(
+        [
+            "ffmpeg",
+            "-loglevel",
+            "error",
+            "-i",
+            "pipe:0",
+            "-codec:a",
+            "libmp3lame",
+            "-b:a",
+            "128k",
+            "-f",
+            "mp3",
+            "pipe:1",
+        ],
+        input=wav_bytes,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=True,
+    )
+    return result.stdout
+
+
 @app.function(
     gpu="L40S",
     timeout=900,
@@ -379,11 +403,12 @@ def fastapi_app():
             wav_bytes = _pcm_to_wav_bytes(pcm, track_sample_rate)
             if slow_audio_value and config["backend"] != "kokoro":
                 wav_bytes = _apply_tempo_filter(wav_bytes, SLOW_AUDIO_SPEED_MULTIPLIER)
+            audio_bytes = _encode_mp3_bytes(wav_bytes)
         except HTTPException:
             raise
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=500, detail=f"TTS synthesis failed: {exc}") from exc
 
-        return Response(content=wav_bytes, media_type="audio/wav")
+        return Response(content=audio_bytes, media_type="audio/mpeg")
 
     return web_app

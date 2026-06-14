@@ -617,7 +617,7 @@ def build_hero_sidecard_html() -> str:
                 <span>structured daily practice</span>
             </div>
             <div class="passport-card">
-                <strong>ZIP + WAV</strong>
+                <strong>ZIP + MP3</strong>
                 <span>portable study kit</span>
             </div>
             <div class="passport-card">
@@ -835,7 +835,7 @@ def build_app() -> gr.Blocks:
                             value=20,
                             step=1,
                             label="Sentence count",
-                            info=f"Audio is grouped into WAV files of up to {SENTENCES_PER_AUDIO_FILE} sentences each.",
+                            info=f"Audio is grouped into MP3 files of up to {SENTENCES_PER_AUDIO_FILE} sentences each.",
                         )
                         build_button = gr.Button("Build study pack", variant="primary")
                         gr.Markdown(
@@ -946,7 +946,7 @@ def build_app() -> gr.Blocks:
                                     gr.HTML(
                                         build_panel_heading_html(
                                             "Downloads",
-                                            "Grab the ZIP bundle or use the individual WAV files directly.",
+                                            "Grab the ZIP bundle or use the individual MP3 files directly.",
                                         )
                                     )
                                     zip_output = gr.File(label="Download the full study pack ZIP")

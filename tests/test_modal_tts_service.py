@@ -105,3 +105,9 @@ def test_modal_tts_service_image_installs_kokoro_runtime_requirements(monkeypatc
 
     run_commands = [value for op, value in operations if op == "run_commands"]
     assert run_commands == [("python -m unidic download",)]
+
+
+def test_modal_tts_service_emits_mp3_audio(monkeypatch) -> None:
+    module = _load_module(monkeypatch)
+
+    assert 'media_type="audio/mpeg"' in inspect.getsource(module.fastapi_app)
