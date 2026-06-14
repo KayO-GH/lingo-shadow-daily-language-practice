@@ -11,20 +11,16 @@ from study_pack import (
     DEFAULT_SENTENCE_COUNT,
     GeneratedStudyPlan,
     HF_GENERATION_MODEL,
-    HF_GENERATION_PARAMS,
     MAX_SENTENCE_COUNT,
     MIN_SENTENCE_COUNT,
     SENTENCES_PER_AUDIO_FILE,
     TARGET_LANGUAGE,
     TRANSLATION_MODEL,
-    TRANSLATION_MODEL_PARAMS,
     build_results_rows,
     create_study_pack,
     generate_sentence_cards,
-    get_model_stack_summary,
     get_native_language_choices,
     get_supported_language_labels,
-    get_tts_backend_config,
     load_environment,
     validate_sentence_count,
     warmup_tts_backend,
@@ -828,18 +824,6 @@ def build_panel_heading_html(title: str, description: str|None = None) -> str:
     </div>
     """.strip()
 
-def build_model_stack_md(target_language: str) -> str:
-    tts_backend = get_tts_backend_config(target_language)
-    total_params = HF_GENERATION_PARAMS + TRANSLATION_MODEL_PARAMS + tts_backend.params
-    return (
-        f"- Generation: `{HF_GENERATION_MODEL}` ({HF_GENERATION_PARAMS:,} params)\n"
-        f"- Translation: `{TRANSLATION_MODEL}` ({TRANSLATION_MODEL_PARAMS:,} params)\n"
-        f"- TTS for {target_language}: `{tts_backend.model_label}` (~{tts_backend.params:,} params) via Modal\n"
-        f"- TTS voice profile: `{tts_backend.voice_label}`\n"
-        f"- Total: **~{total_params:,}** params\n"
-        f"- Stack summary: `{get_model_stack_summary(target_language)}`"
-    )
-
 
 def toggle_motivation_panel(is_visible: bool):
     next_visible = not is_visible
@@ -900,7 +884,7 @@ def build_success_state(
         f"**{len(bundle.audio_paths)}** downloadable audio track(s) with up to "
         f"**{SENTENCES_PER_AUDIO_FILE}** sentences per file using "
         f"`{HF_GENERATION_MODEL}` for pack generation, `{TRANSLATION_MODEL}` for translation, "
-        f"plus **{bundle.tts_backend_label}**."
+        f"with `{bundle.tts_backend_label}` for audio synthesis."
     )
     assumptions_md = (
         "### Working assumptions\n"
@@ -1065,14 +1049,12 @@ def build_app() -> gr.Blocks:
                     motivation_open = gr.State(False)
                     with gr.Row(elem_classes="hero-action-row"):
                         motivation_button = gr.Button(
-                            "Why this strategy works...",
+                            "Why this works...",
                             variant="secondary",
                             elem_id="motivation-button",
                         )
                     with gr.Column(visible=False, elem_id="motivation-panel") as motivation_panel:
                         gr.HTML(build_motivation_html())
-                    with gr.Accordion("Model stack", open=False):
-                        model_stack_output = gr.Markdown(build_model_stack_md(TARGET_LANGUAGE))
 
                 with gr.Column(scale=5, elem_classes="hero-card-wrap"):
                     gr.HTML(build_hero_sidecard_html())
@@ -1240,12 +1222,6 @@ def build_app() -> gr.Blocks:
                                         elem_id="assumptions-output",
                                     )
 
-
-            target_language.change(
-                fn=build_model_stack_md,
-                inputs=[target_language],
-                outputs=[model_stack_output],
-            )
             motivation_button.click(
                 fn=toggle_motivation_panel,
                 inputs=[motivation_open],

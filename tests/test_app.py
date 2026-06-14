@@ -84,6 +84,38 @@ def test_warmup_selected_language_ignores_failures(monkeypatch) -> None:
     assert app.warmup_selected_language("French") is None
 
 
+def test_build_success_state_includes_runtime_models() -> None:
+    class FakeStep:
+        minutes = 15
+        title = "Shadow"
+        instructions = "Repeat the target sentences aloud."
+
+    class FakeCard:
+        scenario = "Groceries"
+        source_sentence = "I need fruit."
+        target_sentence = "J'ai besoin de fruits."
+        verb_lemma = "avoir besoin"
+
+    class FakePlan:
+        cards = [FakeCard()]
+        assumptions = ["The learner shops in person."]
+        rationale = "Focus on recurring errands first."
+        routine_steps = [FakeStep()]
+        focus_verbs = ["avoir besoin"]
+
+    class FakeBundle:
+        audio_paths = ["track-1.mp3"]
+        tts_backend_label = "kyutai/tts-1.6b-en_fr"
+        preview_audio_path = "preview.mp3"
+        zip_path = "pack.zip"
+
+    result = app.build_success_state(FakePlan(), "French", FakeBundle())
+
+    assert "Qwen/Qwen3-8B" in result[0]
+    assert "CohereLabs/tiny-aya-global" in result[0]
+    assert "kyutai/tts-1.6b-en_fr" in result[0]
+
+
 def test_app_config_uses_new_sentence_count_range_and_registers_warmup_events() -> None:
     config = app.demo.get_config_file()
     sentence_slider = next(
@@ -99,7 +131,7 @@ def test_app_config_uses_new_sentence_count_range_and_registers_warmup_events() 
     api_names = [dependency["api_name"] for dependency in config["dependencies"]]
     warmup_api_names = [name for name in api_names if isinstance(name, str) and name.startswith("warmup_selected_language")]
     assert len(warmup_api_names) == 2
-    assert "build_model_stack_md" in api_names
+    assert "toggle_motivation_panel" in api_names
     assert "stream_pack_builder" in api_names
 
 
