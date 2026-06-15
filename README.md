@@ -12,7 +12,7 @@ tags:
   - track:backyard
   - sponsor:openai
   - sponsor:modal
-  - achievement:off-brand
+  - achievement:offbrand
   - achievement:fieldnotes
 models:
   - Qwen/Qwen3-8B
@@ -65,8 +65,9 @@ Each individual model in the default app stack is below the Build Small hackatho
 
 ## Supported languages
 
-- target-language choices currently exposed in the UI: English, French, Spanish, German, Italian, Portuguese, Japanese
+- currently supported target languages: English, French, Spanish, German, Italian, Portuguese, Japanese
 - source-language prompts can be generated from English, French, Spanish, German, Portuguese, Italian, or Japanese
+- new target languages will be added as quickly as I can integrate reliable TTS models for them
 - the app does not auto-detect TTS language; it uses the selected target language
 - the default built-in router matrix is:
   - `en`, `fr` -> `kyutai/tts-1.6b-en_fr`
