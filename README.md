@@ -12,24 +12,46 @@ tags:
   - track:backyard
   - sponsor:openai
   - sponsor:modal
+  - achievement:off-brand
   - achievement:fieldnotes
+models:
+  - Qwen/Qwen3-8B
+  - CohereLabs/tiny-aya-global
+  - kyutai/tts-1.6b-en_fr
+  - facebook/mms-tts-deu
+  - hexgrad/Kokoro-82M
 ---
 
 # LingoShadow - Daily Language Practice
 
 `LingoShadow - Daily Language Practice` is a standalone Gradio project for building a personalized self-study pack from real daily-life situations. The app now supports multiple target languages, with the TTS backend selected per target language using the earlier language-router plan from this project.
 
+## Links
+
+- Hugging Face Space: https://huggingface.co/spaces/build-small-hackathon/lingo-shadow-daily-language-practice
+- Live app: https://build-small-hackathon-lingo-shadow-daily-languag-56b0bec.hf.space/
+- GitHub repo: https://github.com/KayO-GH/daily-language-practice
+- Demo video: pending final submission link
+- Social post: pending final submission link
+
+## Try the demo
+
+1. Open the live app.
+2. Keep the default target language as `French`, or choose another supported target language.
+3. Use the default daily-routine prompt or describe your own commute, errands, work, family, travel, and shopping situations.
+4. Click `Build study pack`.
+5. Review the generated sentence table, play the first MP3 preview, and download the ZIP bundle.
+
 ## Hackathon-safe model stack
 
-- Generation: `Qwen/Qwen3-8B` with `8,200,000,000` parameters
-- Translation: `CohereLabs/tiny-aya-global` with `3,350,000,000` parameters
+- Generation: `Qwen/Qwen3-8B` with `8.2B` parameters
+- Translation: `CohereLabs/tiny-aya-global` with `3.35B` parameters
 - TTS:
   - English, French: `kyutai/tts-1.6b-en_fr` at approximately `1.8B`
-  - German: `facebook/mms-tts-deu` at `36,285,936`
-  - Spanish, Italian, Portuguese, Japanese: `hexgrad/Kokoro-82M` at `82,000,000`
-- Default total model budget: approximately `13,350,000,000` parameters
+  - German: `facebook/mms-tts-deu` at `36M`
+  - Spanish, Italian, Portuguese, Japanese: `hexgrad/Kokoro-82M` at `82M`
 
-This keeps the default app stack comfortably inside the Build Small hackathon `<= 32B` total-parameter limit. If you swap in a different TTS model for another target language, update the per-language `MODAL_TTS_PARAMS_<LANG_CODE>` value so the UI and exported study pack keep the parameter disclosure accurate.
+Each individual model in the default app stack is below the Build Small hackathon `<= 32B` model cap. For transparency, the default French stack is approximately `13.35B` aggregate parameters across generation, translation, and TTS, but the hackathon constraint is applied per model.
 
 ## What it does
 
@@ -58,7 +80,7 @@ This keeps the default app stack comfortably inside the Build Small hackathon `<
 This app loads environment variables in this order:
 
 1. `lingo-shadow-daily-language-practice/.env`
-2. `/Users/Kwadwo/Documents/PROJECTS/NITA-bill-review/.env`
+2. the local fallback env file, when present in the developer workspace
 
 App-side variables:
 
@@ -87,12 +109,12 @@ This repo currently expects that Modal secret to be attached from a secret named
 uv venv .venv
 source .venv/bin/activate
 uv sync
-uv run python app.py
+uv run gradio app.py
 ```
 
 ## Deploy the Modal TTS service
 
-The repo includes [`modal_tts_service.py`](/Users/Kwadwo/Documents/PROJECTS/HF-Build-Small/lingo-shadow-daily-language-practice/modal_tts_service.py), which serves one language-routed TTS API behind:
+The repo includes [`modal_tts_service.py`](modal_tts_service.py), which serves one language-routed TTS API behind:
 
 - `GET /healthz`
 - `POST /warmup`
