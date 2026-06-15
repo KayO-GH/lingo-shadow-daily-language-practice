@@ -30,7 +30,7 @@ models:
 - Hugging Face Space: https://huggingface.co/spaces/build-small-hackathon/lingo-shadow-daily-language-practice
 - Live app: https://build-small-hackathon-lingo-shadow-daily-languag-56b0bec.hf.space/
 - GitHub repo: https://github.com/KayO-GH/daily-language-practice
-- Demo video: pending final submission link
+- Demo video: https://www.loom.com/share/1ea6c133476e4a7a8578787043a303dc
 - Social post: https://www.linkedin.com/posts/kwadwo-agyapon-ntra_smallmodels-tinymodels-buildsmall-activity-7472256515995922433-QX1u
 - Blog post: https://kayo-gh.github.io/building-lingoshadow/
 
