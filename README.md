@@ -12,7 +12,6 @@ tags:
   - track:backyard
   - sponsor:openai
   - sponsor:modal
-  - achievement:offbrand
   - achievement:fieldnotes
 models:
   - Qwen/Qwen3-8B
@@ -33,6 +32,7 @@ models:
 - GitHub repo: https://github.com/KayO-GH/daily-language-practice
 - Demo video: pending final submission link
 - Social post: https://www.linkedin.com/posts/kwadwo-agyapon-ntra_smallmodels-tinymodels-buildsmall-activity-7472256515995922433-QX1u
+- Blog post: https://kayo-gh.github.io/building-lingoshadow/
 
 ## Try the demo
 
@@ -42,7 +42,7 @@ models:
 4. Click `Build study pack`.
 5. Review the generated sentence table, play the first MP3 preview, and download the ZIP bundle.
 
-## Hackathon-safe model stack
+## Model stack
 
 - Generation: `Qwen/Qwen3-8B` with `8.2B` parameters
 - Translation: `CohereLabs/tiny-aya-global` with `3.35B` parameters
