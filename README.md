@@ -32,7 +32,7 @@ models:
 - Live app: https://build-small-hackathon-lingo-shadow-daily-languag-56b0bec.hf.space/
 - GitHub repo: https://github.com/KayO-GH/daily-language-practice
 - Demo video: pending final submission link
-- Social post: pending final submission link
+- Social post: https://www.linkedin.com/posts/kwadwo-agyapon-ntra_smallmodels-tinymodels-buildsmall-activity-7472256515995922433-QX1u
 
 ## Try the demo
 
